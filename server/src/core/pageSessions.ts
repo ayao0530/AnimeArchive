@@ -1,38 +1,44 @@
 /**
- * 网页会话登记 —— 「还有页面开着吗？」
+ * 网页连接登记 —— 「还有页面连着吗？」
  *
  * 用途：**关掉最后一个网页 → 自动关闭本地服务**（配置 `shutdownOnPageClose`）。
  *
- * 为什么不直接在浏览器 beforeunload 里调一次 `/api/shutdown` 就完事？
- *  1. **刷新页面（F5 / Ctrl+R）同样会触发卸载** —— 卸载即关闭的话，用户一刷新服务就没了。
- *     做法：最后一个会话注销后先等 `graceMs`（宽限期）；期间只要有新页面登记（= 刷新回来了）
- *     就取消关闭。
- *  2. **多标签页**：只要还有任何一个页面开着就不能停服务（关掉其中一个标签页不该停服务）。
- *     做法：会话按「页面」登记，只有登记表清空才考虑关闭。
- *  3. **误伤**：只认「登记过的会话 id」。没登记过的 id 一律忽略，避免其它工具（或残留的旧页面）
- *     随手发一个请求就把服务关掉。
+ * ## 为什么用「长连接」而不是前端 sendBeacon 上报
  *
- * 已知取舍：如果服务是**在页面开着的时候**被重启过（登记表被清空），那个页面再关闭时
- * 服务不会自动跟着退出（因为 id 认不出来）—— 此时用网页上的「⏻ 关闭服务」或 `stop.bat` 即可。
+ * 早前的实现是：页面加载时 `POST /api/page/open` 登记，关闭时 `sendBeacon('/api/page/close')` 注销。
+ * 它有一个致命缺陷 —— **页面被「强制销毁」时浏览器根本不会发 unload 事件**：
+ * 关掉整个浏览器 / 关掉 VS Code 窗口 / 预览被回收 / 标签页崩溃……
+ * 这些情况下信令发不出去，那个会话就**永远留在登记表里**，
+ * 于是「最后一个页面关掉了」永远不成立 ⇒ **关页自动关服务从此永久失效**（用户实测踩到）。
+ *
+ * 长连接（SSE）没有这个问题：页面一没，TCP 连接被系统关掉，服务端立刻知道；
+ * 页面还在但断了线（罕见）时，浏览器按服务端下发的 `retry:` 自动重连，
+ * 而下面的**宽限期**正好盖住这零点几秒的空窗。
+ *
+ * ## 三条规则
+ *  1. **同一个 id 可以有多条连接**（刷新时新旧连接短暂并存；dev 下 React 双挂载也会）⇒ 按引用计数。
+ *  2. 计数归零**不立即**退出，先等 `graceMs`（默认 2.5s）；期间有新连接进来（= 刷新回来了）就取消。
+ *  3. 配置里关掉该功能时（`shutdownOnPageClose: false`）只登记、绝不退出。
  */
 
 export interface PageSessions {
-  /** 页面打开（或刷新后重新登记）：会取消挂起的自动关闭 */
-  open: (id: string) => void;
-  /** 页面关闭；返回 true = 已受理（该会话确实登记过），false = 未知会话（忽略） */
-  close: (id: string) => boolean;
-  /** 当前还开着的页面数（诊断用） */
+  /**
+   * 一个页面建立长连接；**返回值是「断开」函数**（连接关闭时必须调用一次）。
+   * 同一个 id 重复调用会累加计数，对应地调用同样次数的断开函数即可。
+   */
+  attach: (id: string) => () => void;
+  /** 当前连着的页面数（按 id 计，诊断用） */
   count: () => number;
   /** 是否有挂起的自动关闭（诊断 / 测试用） */
   pending: () => boolean;
-  /** 清空会话与挂起的定时器（关服务前收尾 / 测试用） */
+  /** 清空所有连接与挂起的定时器（关服务前收尾 / 测试用） */
   reset: () => void;
 }
 
 export interface PageSessionsOptions {
   /**
-   * 最后一个页面关闭后等多久再真正关闭服务。
-   * 这一段就是「给刷新留的时间」：刷新时新页面会在几百毫秒内重新登记。
+   * 最后一个页面断开后等多久再真正关闭服务。
+   * 这一段就是「给刷新留的时间」：新页面会在几百毫秒内重新连上。
    */
   graceMs?: number;
   /** 是否启用自动关闭（`shutdownOnPageClose === false` 时只登记、不关闭） */
@@ -43,7 +49,7 @@ export interface PageSessionsOptions {
   log?: (msg: string) => void;
 }
 
-/** 2.5 秒：够刷新页面重新登记，又不至于让用户觉得「关了网页服务还在」 */
+/** 2.5 秒：够刷新页面重新连上，又不至于让用户觉得「关了网页服务还赖着」 */
 export const DEFAULT_PAGE_CLOSE_GRACE_MS = 2500;
 
 export function createPageSessions(opts: PageSessionsOptions): PageSessions {
@@ -51,7 +57,8 @@ export function createPageSessions(opts: PageSessionsOptions): PageSessions {
   const enabled = opts.enabled ?? ((): boolean => true);
   const log = opts.log ?? ((): void => undefined);
 
-  const pages = new Set<string>();
+  /** id → 连接数（同一页面可能短暂并存多条连接） */
+  const pages = new Map<string, number>();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const cancel = (why: string): void => {
@@ -61,29 +68,36 @@ export function createPageSessions(opts: PageSessionsOptions): PageSessions {
     log(`↩ 已取消自动关闭服务（${why}）`);
   };
 
-  return {
-    open: id => {
-      if (!id) return;
-      const isNew = !pages.has(id);
-      pages.add(id);
-      if (isNew) cancel('页面重新打开 / 刷新');
-    },
+  const schedule = (): void => {
+    if (timer) return;
+    if (!enabled()) {
+      log('ℹ 最后一个页面已断开，但设置里已关闭「关闭网页时自动关闭服务」→ 服务继续运行');
+      return;
+    }
+    const label = graceMs >= 1000 ? `${graceMs / 1000} 秒` : `${graceMs} 毫秒`;
+    log(`ℹ 最后一个页面已断开 → ${label}后自动关闭服务（期间重新打开页面可取消）`);
+    timer = setTimeout(() => {
+      timer = null;
+      opts.onCloseService();
+    }, graceMs);
+  };
 
-    close: id => {
-      // 未登记过的会话：忽略（防止别的工具一个请求就把服务关掉）
-      if (!pages.delete(id)) return false;
-      if (pages.size > 0) return true;            // 还有别的页面开着 → 不关
-      if (timer) return true;                     // 已经在倒计时 → 不重复计时
-      if (!enabled()) {
-        log('ℹ 最后一个页面已关闭，但设置里已关闭「关闭网页时自动关闭服务」→ 服务继续运行');
-        return true;
-      }
-      log(`ℹ 最后一个页面已关闭 → ${graceMs >= 1000 ? `${graceMs / 1000} 秒` : `${graceMs} 毫秒`}后自动关闭服务（期间重新打开页面可取消）`);
-      timer = setTimeout(() => {
-        timer = null;
-        opts.onCloseService();
-      }, graceMs);
-      return true;
+  return {
+    attach: id => {
+      const key = id || '(anonymous)';
+      pages.set(key, (pages.get(key) ?? 0) + 1);
+      cancel('页面重新连上');
+      let detached = false;
+      return () => {
+        if (detached) return;              // close/error 都会触发，防重复断开
+        detached = true;
+        const left = (pages.get(key) ?? 0) - 1;
+        if (left > 0) pages.set(key, left);
+        else {
+          pages.delete(key);
+          if (pages.size === 0) schedule();
+        }
+      };
     },
 
     count: () => pages.size,

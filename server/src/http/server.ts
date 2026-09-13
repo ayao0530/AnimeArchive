@@ -38,8 +38,8 @@ export interface ServerContext {
   indexDirs: string[];
   startedAt: number;
   /**
-   * 网页会话登记：关掉最后一个页面 → 服务自动关闭（实现见 index.ts）。
-   * 由前端在页面加载时 `/api/page/open`、关闭时 `/api/page/close`（sendBeacon）。
+   * 网页长连接登记：**关掉最后一个页面 → 服务自动关闭**（实现见 index.ts）。
+   * 前端在页面加载时开一条 SSE（`/api/page/watch?sessionId=…`），连接断开即代表页面没了。
    */
   pageSessions: PageSessions;
   onShutdown: () => void;
@@ -130,43 +130,34 @@ async function handleApi(
       return sendJson(res, 200, { ok: true, data: ctx.store.getConfig() });
     }
 
-    /* ---------- 网页会话：关掉最后一个页面 → 自动关闭服务 ----------
-     * 前端在页面加载时登记（open）、关闭时注销（close，走 sendBeacon 所以卸载阶段也发得出去）。
-     * 最后一个会话注销后不会立即退出：服务端会等一小段宽限期，期间有新页面登记（= 刷新）即取消。
-     * 没登记过的 sessionId 一律忽略 —— 避免别的工具随手一个请求就把服务关掉。
+    /* ---------- 网页长连接：关掉最后一个页面 → 自动关闭服务 ----------
+     * 页面加载时开一条 SSE（`/api/page/watch`），连接**断开即代表页面没了**。
+     * 为什么不靠前端 sendBeacon 上报：页面被强制销毁（关浏览器 / 关 VS Code 窗口 / 崩溃）时
+     * 浏览器不发 unload，信令发不出去 ⇒ 旧实现会留下「幽灵会话」导致自动关闭永久失效（用户实测踩到）。
+     * 最后一个连接断开后不会立即退出：服务端等一小段宽限期，期间有新连接（= 刷新）即取消。
      */
-    case '/api/page/open': {
-      if (method !== 'POST') return sendJson(res, 405, { ok: false, error: '仅支持 POST' });
-      const body = await readJson<{ sessionId?: string }>(req);
-      const id = (body?.sessionId ?? '').trim();
+    case '/api/page/watch': {
+      if (method !== 'GET') return sendJson(res, 405, { ok: false, error: '仅支持 GET' });
+      const id = (url.searchParams.get('sessionId') ?? '').trim();
       if (!id) return sendJson(res, 400, { ok: false, error: '缺少 sessionId' });
-      ctx.pageSessions.open(id);
-      return sendJson(res, 200, {
-        ok: true,
-        data: {
-          tracked: true,
-          pages: ctx.pageSessions.count(),
-          shutdownOnPageClose: ctx.store.getConfig().shutdownOnPageClose !== false
-        }
+      const sse = openSse(res, 1000);   // 断线后 1 秒重连（默认 3 秒，宽限期只有 2.5 秒）
+      const detach = ctx.pageSessions.attach(id);
+      sse.send({
+        type: 'watching',
+        pages: ctx.pageSessions.count(),
+        shutdownOnPageClose: ctx.store.getConfig().shutdownOnPageClose !== false
       });
-    }
-
-    case '/api/page/close': {
-      if (method !== 'POST') return sendJson(res, 405, { ok: false, error: '仅支持 POST' });
-      const body = await readJson<{ sessionId?: string }>(req);
-      const id = (body?.sessionId ?? '').trim();
-      if (!id) return sendJson(res, 400, { ok: false, error: '缺少 sessionId' });
-      const accepted = ctx.pageSessions.close(id);
-      return sendJson(res, 200, {
-        ok: true,
-        data: {
-          accepted,
-          pages: ctx.pageSessions.count(),
-          /** 是否已进入「即将关闭」倒计时（关掉最后一个页面且开启了自动关闭） */
-          closing: ctx.pageSessions.pending(),
-          shutdownOnPageClose: ctx.store.getConfig().shutdownOnPageClose !== false
-        }
-      });
+      let done = false;
+      const bye = (): void => {
+        if (done) return;               // close / error 都会触发
+        done = true;
+        detach();
+        sse.close();
+      };
+      req.on('close', bye);
+      req.on('error', bye);
+      res.on('close', bye);
+      return;
     }
 
     /* ---------- 一键关闭服务 ---------- */
@@ -787,13 +778,15 @@ interface Sse {
   close: () => void;
 }
 
-function openSse(res: http.ServerResponse): Sse {
+function openSse(res: http.ServerResponse, retryMs?: number): Sse {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no'
   });
+  // `retry:` 告诉浏览器断线后多久重连（默认约 3 秒，页面临时断线时可能超过宽限期）
+  if (retryMs && Number.isFinite(retryMs)) res.write(`retry: ${Math.max(100, Math.floor(retryMs))}\n\n`);
   res.write(': connected\n\n');
   let closed = false;
   const timer = setInterval(() => {

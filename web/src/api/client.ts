@@ -114,21 +114,11 @@ export const api = {
     request<AppConfig>('/api/config', { method: 'POST', body: JSON.stringify(patch) }),
   shutdown: () => request<{ message: string }>('/api/shutdown', { method: 'POST' }),
 
-  /**
-   * 网页会话登记：页面加载时登记，关掉**最后一个**页面时服务端会自动关闭服务。
-   * 会话 id 只活在当前这一次页面加载里（刷新 = 新会话，服务端靠宽限期识别「是刷新不是关闭」）。
+  /*
+   * 网页会话不再用「POST 登记 / sendBeacon 注销」，而是由 pageLifecycle.ts 开一条
+   * `GET /api/page/watch?sessionId=…` 的 SSE 长连接：**连接断开就等于页面没了**，
+   * 这样页面被强制销毁（关浏览器 / 关 VS Code 窗口 / 崩溃）时也不会留下幽灵会话。
    */
-  pageOpen: (sessionId: string) =>
-    request<{ tracked: boolean; pages: number; shutdownOnPageClose: boolean }>('/api/page/open', {
-      method: 'POST',
-      body: JSON.stringify({ sessionId })
-    }),
-  /** 页面关闭时注销会话（实际调用走 sendBeacon，见 pageLifecycle.ts） */
-  pageClose: (sessionId: string) =>
-    request<{ accepted: boolean; pages: number; closing: boolean; shutdownOnPageClose: boolean }>(
-      '/api/page/close',
-      { method: 'POST', body: JSON.stringify({ sessionId }) }
-    ),
 
   checkPath: (path: string) =>
     request<{ exists: boolean; readable: boolean; writable: boolean }>(

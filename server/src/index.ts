@@ -78,8 +78,9 @@ async function main(): Promise<void> {
   const publicDataDir = path.join(PROJECT_ROOT, 'web', 'public', 'data');
 
   /*
-   * 网页会话：前端在页面加载时登记、关闭时注销；
+   * 网页长连接：页面打开时连上 `GET /api/page/watch`（SSE），**连接断开即代表页面没了**。
    * 关掉**最后一个**页面 → 宽限期（默认 2.5s，给「刷新页面」留时间）后自动关闭服务。
+   * 不靠前端 sendBeacon 上报：页面被强制销毁时浏览器不发 unload，会留下幽灵会话。
    */
   const pageSessions = createPageSessions({
     enabled: () => store.getConfig().shutdownOnPageClose !== false,

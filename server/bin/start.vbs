@@ -34,10 +34,14 @@ sh.CurrentDirectory = serverDir
 ' If the service is already running, just open the browser.
 ' (Starting a second instance would silently move to port 9999+1 and the
 '  browser would keep talking to the stale one.)
-Dim healthUrl
-healthUrl = "http://127.0.0.1:" & ReadPort(serverDir & "\data\config.json") & "/api/health"
+'
+' NOTE: open the **site root** - /api/health is a JSON API, opening it just
+' shows {"ok":true,...} instead of the app. It is only used as a probe here.
+Dim siteUrl, healthUrl
+siteUrl = "http://127.0.0.1:" & ReadPort(serverDir & "\data\config.json") & "/"
+healthUrl = siteUrl & "api/health"
 If AlreadyRunning(healthUrl) Then
-  sh.Run healthUrl, 1, False
+  sh.Run siteUrl, 1, False
   WScript.Quit 0
 End If
 

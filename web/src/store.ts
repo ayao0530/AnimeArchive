@@ -91,8 +91,6 @@ export interface AppState {
   libraryError: string | null;
   libQuery: string;
   chartMode: 'count' | 'size';
-  /** 统计粒度：按年份 / 按月份（媒体库「📊 统计与图表」） */
-  chartBucket: 'year' | 'month';
 
   /* ---------------- actions ---------------- */
   boot: () => Promise<void>;
@@ -184,7 +182,6 @@ export interface AppState {
   loadLibrary: () => Promise<void>;
   rebuildIndex: () => Promise<void>;  setLibQuery: (q: string) => void;
   setChartMode: (m: 'count' | 'size') => void;
-  setChartBucket: (b: 'year' | 'month') => void;
   play: (fullPath: string, name: string) => Promise<void>;
   revertFile: (fullPath: string, name: string) => Promise<void>;
   renameLibraryAnime: (relPath: string, newName: string) => Promise<void>;
@@ -286,7 +283,6 @@ export const useApp = create<AppState>((set, get) => ({
   libraryError: null,
   libQuery: '',
   chartMode: 'count',
-  chartBucket: 'year',
   focusAnime: null,
   selected: [],
 
@@ -1132,7 +1128,6 @@ export const useApp = create<AppState>((set, get) => ({
 
   setLibQuery: q => set({ libQuery: q }),
   setChartMode: m => set({ chartMode: m }),
-  setChartBucket: b => set({ chartBucket: b }),
 
   play: async (fullPath, name) => {
     if (!get().serviceOnline) { get().showToast('⚠️ 请先启动本地服务', '#f2b632'); return; }

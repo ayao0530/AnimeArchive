@@ -772,52 +772,68 @@ async function main(): Promise<void> {
   check('A39', '媒体库文件按集数数字排：多字幕组混排时 01 后面跟 02 而不是 14；无集数的排最后',
     gotOrder === wantOrder, `实际：${gotOrder}`);
 
-  /* ---------- A40 「关掉最后一个网页 → 自动关闭服务」的会话登记 ---------- */
-  // 这条锁的是「什么时候才该关服务」：
-  //   ① 没登记过的会话 id 一律忽略（防止别的工具一个请求就把服务关掉）
-  //   ② 只关掉多个标签页里的一个 → 不关
-  //   ③ 最后一个页面关掉后，宽限期内重新登记（= 刷新页面）→ 取消关闭
-  //   ④ 真的没页面了 → 宽限期到点才关（且只关一次）
+  /* ---------- A40 「关掉最后一个网页 → 自动关闭服务」的连接登记 ---------- */
+  // 这条锁的是「什么时候才该关服务」。登记方式是**长连接**（SSE），断开即代表页面没了：
+  //   ① 只关掉多个标签页里的一个 → 不关
+  //   ② 最后一个页面断开（哪怕是没有任何信令的「强制销毁」）→ 宽限期到点才关，且只关一次
+  //   ③ 宽限期内重新连上（= 刷新页面）→ 取消关闭
+  //   ④ 同一个 id 的多条连接（刷新时新旧连接短暂并存）按引用计数
   //   ⑤ 设置里关掉该功能 → 永不自动关
+  //   ⚠ ② 正是旧实现（POST 登记 + sendBeacon 注销）做不到的：页面被强制销毁时浏览器不发 unload，
+  //      信令发不出去 ⇒ 登记表里留下幽灵会话 ⇒ 自动关闭永久失效（用户实测踩到）
   const delay = (ms: number): Promise<void> => new Promise(res => setTimeout(res, ms));
   {
     let closed = 0;
     const s = createPageSessions({ graceMs: 40, onCloseService: () => { closed++; } });
-    s.open('tab-a');
-    s.open('tab-b');
-    const unknownAccepted = s.close('never-opened');       // ①
-    s.close('tab-a');                                      // ②
-    const pendingAfterOne = s.pending();
+    const offA = s.attach('tab-a');
+    const offB = s.attach('tab-b');
+    offA();                                                // ① 关掉其中一个标签页
+    const pendingAfterOne = s.pending();                   // 应为 false（还有 tab-b）
     await delay(90);
     const afterOneTab = closed;                            // 仍应为 0
 
-    s.close('tab-b');                                      // ③ 最后一个页面
+    offB();                                                // ② 最后一个页面断开（无任何信令）
     const pendingAfterLast = s.pending();                  // 应为 true（已进倒计时）
-    s.open('tab-b-reload');                                // 刷新：宽限期内重新登记
+    const offReload = s.attach('tab-b-reload');            // ③ 刷新：宽限期内重新连上
     const pendingAfterReload = s.pending();                // 应为 false（已取消）
     await delay(90);
     const afterReload = closed;                            // 仍应为 0
 
-    s.close('tab-b-reload');                               // ④ 真的没页面了
+    offReload();                                           // ④ 真的没页面了
     await delay(90);
     const afterLast = closed;                              // 应为 1
     await delay(60);
     const notTwice = closed === 1;                         // 不应重复触发
 
-    // ⑤ 设置里关掉「关闭网页时自动关闭服务」
+    // ⑤ 同一 id 两条连接（刷新时新旧并存）：断掉一条不算「页面没了」
+    const dup1 = s.attach('same-page');
+    const dup2 = s.attach('same-page');
+    dup1();
+    const pendingAfterDup = s.pending();                   // 应为 false
+    await delay(90);
+    const afterDup = closed;                               // 仍应为 1
+    dup2();
+    await delay(90);
+    const afterDupLast = closed;                           // 应为 2
+    const countAtEnd = s.count();                          // 应为 0
+
+    // ⑥ 设置里关掉「关闭网页时自动关闭服务」
     let closedOff = 0;
     const off = createPageSessions({ graceMs: 20, enabled: () => false, onCloseService: () => { closedOff++; } });
-    off.open('only');
-    off.close('only');
+    const offOnly = off.attach('only');
+    offOnly();
     await delay(60);
 
-    check('A40', '关掉最后一个网页才自动关服务：未登记会话忽略 / 多标签只关一个不关 / 刷新取消 / 开关关闭时不关',
-      unknownAccepted === false && afterOneTab === 0 && pendingAfterOne === false &&
+    check('A40', '关掉最后一个网页才自动关服务：多标签只关一个不关 / 最后一个连接断开即触发（无需任何信令）/ 刷新取消 / 同 id 多条连接按引用计数 / 开关关闭时不关',
+      afterOneTab === 0 && pendingAfterOne === false &&
       pendingAfterLast === true && pendingAfterReload === false &&
-      afterReload === 0 && afterLast === 1 && notTwice && closedOff === 0,
-      `未知会话受理=${unknownAccepted}；关一个标签后触发=${afterOneTab}（pending=${pendingAfterOne}）；` +
-      `最后一个页面关闭后 pending=${pendingAfterLast}；刷新后 pending=${pendingAfterReload}、触发=${afterReload}；` +
-      `真关闭触发=${afterLast}（重复触发=${!notTwice}）；开关关闭时触发=${closedOff}`);
+      afterReload === 0 && afterLast === 1 && notTwice &&
+      pendingAfterDup === false && afterDup === 1 && afterDupLast === 2 && countAtEnd === 0 &&
+      closedOff === 0,
+      `关一个标签后触发=${afterOneTab}（pending=${pendingAfterOne}）；最后一个连接断开后 pending=${pendingAfterLast}；` +
+      `刷新后 pending=${pendingAfterReload}、触发=${afterReload}；真关闭触发=${afterLast}（重复触发=${!notTwice}）；` +
+      `同 id 双连接：断一条触发=${afterDup}（pending=${pendingAfterDup}）、断完=${afterDupLast}、连接数=${countAtEnd}；` +
+      `开关关闭时触发=${closedOff}`);
   }
 
   /* ---------- A41 统计「播出月份」口径：集数 ≤3 不纳入 + >14 集跨季重复计入 ---------- */

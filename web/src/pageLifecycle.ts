@@ -4,25 +4,30 @@
  * 规则（与设置里的「关闭网页时自动关闭服务」开关联动，默认开）：
  *  - 没任务在跑 → 直接关：页面一关，服务端在宽限期（2.5s）后退出；
  *  - 有任务在跑 → 先用浏览器**原生二次确认**弹窗拦一下（「确定要离开吗」），
- *    取消 ⇒ 什么都不发生；确认 ⇒ 才注销会话、关页面，服务端会先让归档批次收尾再退出。
+ *    取消 ⇒ 什么都不发生；确认 ⇒ 才关页面，服务端会先让归档批次收尾再退出。
+ *
+ * ## 登记方式是「长连接」，不是「关页时发请求」
+ *
+ * 页面加载时开一条 SSE：`GET /api/page/watch?sessionId=…`。
+ * **连接断开 = 页面没了**，服务端立刻知道 —— 这样即使页面是被强制销毁的
+ * （关掉整个浏览器 / 关掉 VS Code 窗口 / 预览被回收 / 崩溃，这些场景浏览器**不会**发 unload），
+ * 也不会留下「幽灵会话」把「关掉最后一个页面就关服务」永久堵死。
  *
  * 两个细节：
- *  1. **刷新不会误关**：会话 id 只属于「本次页面加载」，刷新等于新会话；
- *     服务端拿到关闭信令后会等宽限期，新页面在这段时间内登记就取消关闭。
- *  2. **多标签页**：每个标签页各自一个会话，只有**最后一个**页面关掉才会关服务。
+ *  1. **刷新不会误关**：sessionId 只属于「本次页面加载」，刷新 = 新 id 新连接；
+ *     服务端拿到「最后一个连接断开」后会等宽限期，新连接在这段时间内连上就取消。
+ *  2. **多标签页**：每个标签页各自一条连接，只有**最后一个**页面关掉才会关服务。
  *
- * ⚠ 关闭信令必须走 `navigator.sendBeacon`：卸载阶段普通 fetch 会被浏览器取消。
- *   传字符串（Content-Type 变成 text/plain）可避免 CORS 预检，卸载期才真的发得出去。
+ * ⚠ 服务端下发了 `retry: 1000`：万一连接抖动，浏览器 1 秒后就重连，不会超过宽限期。
  */
-import { api, apiUrl } from './api/client';
+import { apiUrl } from './api/client';
 import { useApp } from './store';
 
-/** 本次页面加载的会话 id（刻意不持久化：刷新 = 新会话，多标签页 = 各自独立） */
+/** 本次页面加载的连接 id（刻意不持久化：刷新 = 新 id，多标签页 = 各自独立） */
 const sessionId = newSessionId();
 
 let installed = false;
-let tracked = false;
-let closeSent = false;
+let es: EventSource | null = null;
 
 function newSessionId(): string {
   const c = globalThis.crypto as Crypto | undefined;
@@ -41,31 +46,23 @@ export function isTaskRunning(): boolean {
   return st.busy !== null || st.execProgress?.running === true;
 }
 
-async function register(): Promise<void> {
-  if (tracked) return;
+/** 开长连接（服务在线时调用；重复调用无副作用） */
+function startWatch(): void {
+  if (es || !autoCloseEnabled()) return;
+  if (typeof EventSource === 'undefined') return;   // 极老的浏览器：退化为「只能手动关服务」
   try {
-    await api.pageOpen(sessionId);
-    tracked = true;
+    es = new EventSource(apiUrl(`/api/page/watch?sessionId=${encodeURIComponent(sessionId)}`));
+    // 断线（服务重启 / 网络抖动）时浏览器会按 retry: 1000 自动重连，这里无需处理 onerror
+    es.onerror = () => { /* 交给浏览器自动重连；事件源在 404 等致命错误下会自行停止重试 */ };
   } catch {
-    /* 服务没起来 / 暂时不可达：忽略，之后状态变化时会再登记 */
+    es = null;
   }
 }
 
-function sendCloseSignal(): void {
-  if (closeSent || !tracked || !autoCloseEnabled()) return;
-  closeSent = true;
-  const url = apiUrl('/api/page/close');
-  const body = JSON.stringify({ sessionId });
-  try {
-    if (navigator.sendBeacon?.(url, body)) return;
-  } catch {
-    /* 落到下面的 fetch */
-  }
-  try {
-    void fetch(url, { method: 'POST', body, keepalive: true, headers: { 'Content-Type': 'text/plain' } });
-  } catch {
-    /* 卸载阶段发不出去也没关系：服务端有 stop.bat / ⏻ 按钮兜底 */
-  }
+/** 主动断开长连接（服务被手动关掉 / 页面真的要走了） */
+function stopWatch(): void {
+  try { es?.close(); } catch { /* ignore */ }
+  es = null;
 }
 
 export function installPageLifecycle(): void {
@@ -80,19 +77,21 @@ export function installPageLifecycle(): void {
   });
 
   window.addEventListener('pagehide', (e: PageTransitionEvent) => {
-    // 进 bfcache 时也会触发 pagehide，但页面还会回来 → 不发信令
+    // 主动断掉，服务端立刻知道（浏览器稍后也会断，这样更快）；
+    // 进 bfcache 时 pagehide 也会触发，但页面还会回来 → 交给下面的 pageshow 重新连上
     if (e.persisted) return;
-    sendCloseSignal();
+    stopWatch();
   });
-  window.addEventListener('unload', () => sendCloseSignal()); // 兜底（个别场景 pagehide 不触发）
+  window.addEventListener('unload', () => stopWatch());          // 兜底
+  window.addEventListener('pageshow', e => {
+    // bfcache 恢复 / 前进后退回来：重新连上（服务端此时可能已经在宽限期里了）
+    if (e.persisted) startWatch();
+  });
 
-  // 服务上线（首次连接 / 点「↻ 重新检测服务」）→ 登记；服务被手动关掉 → 下次上线重新登记
+  // 服务上线（首次连接 / 点「↻ 重新检测服务」）→ 开连接；服务被手动关掉 → 断开
   useApp.subscribe(state => {
-    if (state.serviceOnline) void register();
-    else {
-      tracked = false;
-      closeSent = false;
-    }
+    if (state.serviceOnline) startWatch();
+    else stopWatch();
   });
-  if (useApp.getState().serviceOnline) void register();
+  if (useApp.getState().serviceOnline) startWatch();
 }

@@ -32,8 +32,6 @@ function LibToolbar() {
   const setLibQuery = useApp(s => s.setLibQuery);
   const chartMode = useApp(s => s.chartMode);
   const setChartMode = useApp(s => s.setChartMode);
-  const chartBucket = useApp(s => s.chartBucket);
-  const setChartBucket = useApp(s => s.setChartBucket);
   const rebuildIndex = useApp(s => s.rebuildIndex);
   const serviceOnline = useApp(s => s.serviceOnline);
   const libraryLoading = useApp(s => s.libraryLoading);
@@ -54,10 +52,6 @@ function LibToolbar() {
       <div className="seg" id="segChart">
         <span className={chartMode === 'count' ? 'on' : ''} onClick={() => setChartMode('count')}>番剧数量</span>
         <span className={chartMode === 'size' ? 'on' : ''} onClick={() => setChartMode('size')}>占用空间</span>
-      </div>
-      <div className="seg" id="segBucket" title="统计粒度：按年份（每年一部/一片）或按月份（归档目录本来就是 年\月）">
-        <span className={chartBucket === 'year' ? 'on' : ''} onClick={() => setChartBucket('year')}>按年份</span>
-        <span className={chartBucket === 'month' ? 'on' : ''} onClick={() => setChartBucket('month')}>按月份</span>
       </div>
       <button
         onClick={() => void rebuildIndex()}
@@ -811,7 +805,6 @@ function statRowLabel(year: number, month: number): string {
 function LibStatsPanel() {
   const library = useApp(s => s.library);
   const chartMode = useApp(s => s.chartMode);
-  const chartBucket = useApp(s => s.chartBucket);
   const setCollapsedMany = useApp(s => s.setCollapsedMany);
   const requestFocusAnime = useApp(s => s.requestFocusAnime);
   const setLibQuery = useApp(s => s.setLibQuery);
@@ -911,7 +904,6 @@ function LibStatsPanel() {
     );
   }
 
-  const isMonth = chartBucket === 'month';
   const toggleYear = (y: number): void => {
     const cur = expandedYears.includes(y);
     setOpenYears(cur ? expandedYears.filter(x => x !== y) : [...expandedYears, y]);
@@ -928,7 +920,7 @@ function LibStatsPanel() {
     year: m.year
   });
 
-  /** 年份模式：年份行 + （展开时）该年的月份行；月份模式：所有月份平铺 */
+  /** 年份行（月份行只作为它的子行出现） */
   const yearRows: StatsRow[] = airYears.map(y => ({
     key: String(y.year),
     label: String(y.year),
@@ -941,29 +933,20 @@ function LibStatsPanel() {
     year: y.year
   }));
 
-  const rows: StatsRow[] = isMonth
-    // 平铺模式：月份就是顶层行（不能带 depth=1，否则会被套上「子行」的缩进样式）
-    ? months.map(m => ({ ...monthRowOf(m), depth: 0 }))
-    : yearRows.flatMap(r => (
-      r.year !== undefined && expandedYears.includes(r.year)
-        ? [r, ...(monthsByYear.get(r.year) ?? []).map(monthRowOf)]
-        : [r]
-    ));
+  /** 年份行 + （展开时）该年的月份行 */
+  const rows: StatsRow[] = yearRows.flatMap(r => (
+    r.year !== undefined && expandedYears.includes(r.year)
+      ? [r, ...(monthsByYear.get(r.year) ?? []).map(monthRowOf)]
+      : [r]
+  ));
 
   const val = (r: StatsRow): number => (chartMode === 'count' ? r.animeCount : r.totalSize);
-  // 比例尺以「年份」为基准（年份 = 其各月之和，必然 ≥ 月份），月份模式下以月份为基准
-  const scaleRows = isMonth ? rows : yearRows;
-  const max = scaleRows.length ? Math.max(...scaleRows.map(val)) : 1;
+  // 比例尺以「年份」为基准（年份 = 其各月之和，必然 ≥ 月份）
+  const max = yearRows.length ? Math.max(...yearRows.map(val)) : 1;
 
-  const unit = isMonth ? '月份' : '年份';
-  const bucketCount = isMonth ? months.length : yearRows.length;
-  const chartTitle = isMonth
-    ? (chartMode === 'count' ? '各月份番剧数量（部）' : '各月份占用空间')
-    : (chartMode === 'count' ? '各年份番剧数量（部）' : '各年份占用空间');
-  const detailTitle = isMonth ? '月份明细' : '年份明细';
-  const hint = isMonth
-    ? '· 按归档目录的「年\\月」层级统计'
-    : '· 点年份整行即可展开该年的月份（只列真实存在的月份）';
+  const chartTitle = chartMode === 'count' ? '各年份番剧数量（部）' : '各年份占用空间';
+  const detailTitle = '年份明细';
+  const hint = '· 点年份整行即可展开该年的月份（只列真实存在的月份）';
 
   /**
    * 统计口径说明（用户 2026-09-13 定的规则，实现在 utils.computeAirStatsLocal）：
@@ -977,12 +960,12 @@ function LibStatsPanel() {
     airStats && !airStats.fromIndex ? '（旧索引现算，重建索引后一致）' : ''
   ].filter(Boolean).join(' · ');
 
-  /** 该行可展开的年份（null = 不可展开：月份行、平铺模式的月份行、没有归档月份的年份） */
+  /** 该行可展开的年份（null = 不可展开：月份子行、没有归档月份的年份） */
   const expandableYear = (r: StatsRow): number | null =>
-    (!isMonth && r.depth === 0 && r.childCount && r.year !== undefined ? r.year : null);
+    (r.depth === 0 && r.childCount && r.year !== undefined ? r.year : null);
 
-  /** 月份行（仅「按年份」模式下、年份下面展开出来的子行）：点整行 → 该月的番剧名单 */
-  const isMonthChild = (r: StatsRow): boolean => !isMonth && r.depth === 1;
+  /** 月份子行：点整行 → 该月的番剧名单 */
+  const isMonthChild = (r: StatsRow): boolean => r.depth === 1;
 
   /**
    * 展开箭头：**只做展示**。
@@ -1023,7 +1006,7 @@ function LibStatsPanel() {
     };
   };
 
-  const labelCls = (r: StatsRow): string => 'y' + (isMonth || r.depth === 1 ? ' wide' : '');
+  const labelCls = (r: StatsRow): string => 'y' + (r.depth === 1 ? ' wide' : '');
 
   /**
    * 月份行：点**整行**展开该月的番剧名单。
@@ -1064,9 +1047,9 @@ function LibStatsPanel() {
           <div className="stat-card"><div className="k">总占用空间</div><div className="v">{formatSize(stats.totalSize)}</div></div>
           <div className="stat-card"><div className="k">可撤回文件</div><div className="v">{stats.revertableCount}<small>个</small></div></div>
           <div className="stat-card"><div className="k">特殊目录</div><div className="v">{stats.specialCount}<small>个</small></div></div>
-          <div className="stat-card" title={isMonth ? '有归档记录的月份数' : '有归档记录的年份数'}>
-            <div className="k">覆盖{unit}</div>
-            <div className="v">{bucketCount}<small>{isMonth ? '个月' : '年'}</small></div>
+          <div className="stat-card" title="有归档记录的年份数">
+            <div className="k">覆盖年份</div>
+            <div className="v">{yearRows.length}<small>年</small></div>
           </div>
         </div>
 
