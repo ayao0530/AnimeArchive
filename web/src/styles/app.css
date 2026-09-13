@@ -26,6 +26,10 @@
   --panel-bg:rgba(21,26,35,.7);
   --panel-head-bg:rgba(28,34,48,.6);
   --hover-bg:rgba(124,92,255,.07);
+  /* 树形列表的「年份行」高度：月份行吸顶的 top 必须精确等于它，所以写成常量 */
+  --tree-hd:32px;
+  /* .panel-body 的内边距；吸顶行要减掉它才能贴住面板标题栏（见下面 .node-year>.row） */
+  --panel-pad:12px;
 }
 :root[data-theme="light"]{
   --bg:#f4f6fb; --bg-2:#ffffff; --bg-3:#eef1f7;
@@ -152,7 +156,7 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   background:var(--panel-head-bg);font-weight:600;font-size:13px;
 }
 .panel-head .hint{font-weight:400;font-size:11.5px;color:var(--txt-3);margin-left:auto}
-.panel-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.panel-body{flex:1;overflow-y:auto;padding:var(--panel-pad);display:flex;flex-direction:column;gap:10px}
 .panel-body > *{flex:0 0 auto}
 
 /* ---------- 左侧分组卡片 ---------- */
@@ -291,9 +295,34 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
 .items .items-more{
   display:flex;align-items:center;gap:6px;padding:6px 7px;color:var(--txt-3);font-size:11px;
 }
-.node-year{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg-2)}
+/* ⚠ 这里**不能**有 overflow:hidden —— 它会让 .node-year 变成滚动容器，
+   里面的 position:sticky（年份行 / 月份行）会直接失效。圆角改由行自己兜住（见下面 .node-year>.row）。 */
+.node-year{border:1px solid var(--line);border-radius:10px;background:var(--bg-2)}
 .row{display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;transition:.14s}
+/* ---------- 年份行 / 月份行吸顶（往下滚时钉在列表顶部，滚过去自动换下一条） ----------
+   ① sticky 只在「自己的父节点」范围内生效：年份行钉在本年份内，月份行钉在本月份内，
+      所以滚过这一年 / 这一月时上一条会被自然顶走，不会一直挂在顶上；
+   ② sticky 的参照点是**滚动容器的内容区顶部**（top:0 会把 .panel-body 的 12px 内边距
+      留在上方 → 和面板标题栏之间有一条缝），所以要减掉 --panel-pad 才能完全贴合；
+   ③ 年份行钉在 0，月份行钉在它下沿，因此年份行高度必须写死 = --tree-hd；
+   ④ 必须有**不透明**背景，否则下面的卡片会从行里透出来。 */
+.node-year>.row{
+  position:sticky;top:calc(-1 * var(--panel-pad));z-index:3;height:var(--tree-hd);
+  background:var(--bg-2);border-radius:9px;
+}
+.node-month>.row{
+  position:sticky;top:calc(var(--tree-hd) - var(--panel-pad));z-index:2;
+  background:var(--bg-2);border-radius:9px;
+  /* 抵消 .node-month 的 padding-left：吸顶时左侧不能留一条透明缝 */
+  margin-left:-14px;padding-left:25px;
+}
 .row:hover{background:rgba(124,92,255,.07)}
+/* 吸顶行 hover：半透明的 --hover-bg 必须**叠在**不透明的 --bg-2 上（用背景图那层叠），
+   否则鼠标划过年份/月份行时它会变半透明，下面的卡片会透出来 */
+.node-year>.row:hover,.node-month>.row:hover{
+  background-color:var(--bg-2);
+  background-image:linear-gradient(var(--hover-bg),var(--hover-bg));
+}
 .row .caret{color:var(--txt-3);font-size:10px;width:10px;transition:.2s}
 .row.collapsed .caret{transform:rotate(-90deg)}
 .row .label{font-weight:600;font-size:12.5px}
@@ -321,8 +350,9 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
 
 /* ---------- 对照列表 ---------- */
 .diff-table{width:100%;border-collapse:collapse;font-size:11.5px;font-family:Consolas,monospace}
+/* 表头吸顶：与上面的年份/月份行同理，top 要减掉 .panel-body 的内边距才能贴住面板标题栏 */
 .diff-table th{
-  position:sticky;top:0;background:var(--bg-3);color:var(--txt-2);font-weight:600;
+  position:sticky;top:calc(-1 * var(--panel-pad));background:var(--bg-3);color:var(--txt-2);font-weight:600;
   text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-2);font-family:inherit;font-size:11.5px;
   z-index:1;
 }
@@ -445,10 +475,11 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
 /* 折叠箭头：年份 / 月份 / 番剧卡片 / 子目录 四处共用同一套旋转逻辑 */
 .lib-anime .arow .caret,.lib-sub .caret,.lib-month .caret{color:var(--txt-3);font-size:10px;transition:.2s;flex:none}
 .lib-anime .arow.collapsed .caret,.lib-sub.collapsed .caret,.lib-month.collapsed .caret{transform:rotate(-90deg)}
-/* 月份行（媒体库）：可折叠 */
+/* 月份行（媒体库）：可折叠 + 吸顶（钉在年份行下沿，见上面 .node-year>.row 的说明） */
 .lib-month{
   display:flex;align-items:center;gap:8px;
   font-size:11.5px;color:var(--txt-3);padding:6px 12px 4px;font-weight:600;cursor:pointer;
+  position:sticky;top:calc(var(--tree-hd) - var(--panel-pad));z-index:2;background:var(--bg-2);
 }
 .lib-month:hover{color:var(--txt)}
 .lib-month .mname{flex:none}
