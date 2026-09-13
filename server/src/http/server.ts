@@ -24,6 +24,7 @@ import { clearNormalizeCache, buildBangumiQueries } from '../core/normalizer';
 import { BangumiSubject, searchSubjects } from '../bangumi/client';
 import { aliasKey } from '../util/text';
 import { isReadableDir, isWritableDir, normalizePath, toLongPath, ensureDir } from '../fsx/fsx';
+import type { PageSessions } from '../core/pageSessions';
 
 export const VERSION = '1.0.0';
 
@@ -36,6 +37,11 @@ export interface ServerContext {
   /** 索引需要额外写出的目录（如源码目录 web/data） */
   indexDirs: string[];
   startedAt: number;
+  /**
+   * 网页会话登记：关掉最后一个页面 → 服务自动关闭（实现见 index.ts）。
+   * 由前端在页面加载时 `/api/page/open`、关闭时 `/api/page/close`（sendBeacon）。
+   */
+  pageSessions: PageSessions;
   onShutdown: () => void;
 }
 
@@ -107,7 +113,10 @@ async function handleApi(
           pid: process.pid,
           port: ctx.store.getConfig().port,
           uptimeMs: Date.now() - ctx.startedAt,
-          startedAt: new Date(ctx.startedAt).toISOString()
+          startedAt: new Date(ctx.startedAt).toISOString(),
+          /** 还开着的网页数（关掉最后一个页面 → 服务自动关闭） */
+          pages: ctx.pageSessions.count(),
+          shutdownOnPageClose: ctx.store.getConfig().shutdownOnPageClose !== false
         }
       });
     }
@@ -119,6 +128,45 @@ async function handleApi(
         return sendJson(res, 200, { ok: true, data: cfg });
       }
       return sendJson(res, 200, { ok: true, data: ctx.store.getConfig() });
+    }
+
+    /* ---------- 网页会话：关掉最后一个页面 → 自动关闭服务 ----------
+     * 前端在页面加载时登记（open）、关闭时注销（close，走 sendBeacon 所以卸载阶段也发得出去）。
+     * 最后一个会话注销后不会立即退出：服务端会等一小段宽限期，期间有新页面登记（= 刷新）即取消。
+     * 没登记过的 sessionId 一律忽略 —— 避免别的工具随手一个请求就把服务关掉。
+     */
+    case '/api/page/open': {
+      if (method !== 'POST') return sendJson(res, 405, { ok: false, error: '仅支持 POST' });
+      const body = await readJson<{ sessionId?: string }>(req);
+      const id = (body?.sessionId ?? '').trim();
+      if (!id) return sendJson(res, 400, { ok: false, error: '缺少 sessionId' });
+      ctx.pageSessions.open(id);
+      return sendJson(res, 200, {
+        ok: true,
+        data: {
+          tracked: true,
+          pages: ctx.pageSessions.count(),
+          shutdownOnPageClose: ctx.store.getConfig().shutdownOnPageClose !== false
+        }
+      });
+    }
+
+    case '/api/page/close': {
+      if (method !== 'POST') return sendJson(res, 405, { ok: false, error: '仅支持 POST' });
+      const body = await readJson<{ sessionId?: string }>(req);
+      const id = (body?.sessionId ?? '').trim();
+      if (!id) return sendJson(res, 400, { ok: false, error: '缺少 sessionId' });
+      const accepted = ctx.pageSessions.close(id);
+      return sendJson(res, 200, {
+        ok: true,
+        data: {
+          accepted,
+          pages: ctx.pageSessions.count(),
+          /** 是否已进入「即将关闭」倒计时（关掉最后一个页面且开启了自动关闭） */
+          closing: ctx.pageSessions.pending(),
+          shutdownOnPageClose: ctx.store.getConfig().shutdownOnPageClose !== false
+        }
+      });
     }
 
     /* ---------- 一键关闭服务 ---------- */

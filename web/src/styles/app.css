@@ -245,6 +245,8 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
 }
 .items .pick-item{accent-color:var(--accent)}
 .items li:hover{background:rgba(124,92,255,.09);color:var(--txt)}
+/* 条目行整行可勾选（不用精准点小方框）；不设 user-select:none —— 文件名还要能拖选复制 */
+.items li:not(.items-more){cursor:pointer}
 .items li.picked{background:rgba(124,92,255,.14)}
 .items li.overridden{background:rgba(143,208,255,.08)}
 .items li.overridden .fname::after{
@@ -400,6 +402,21 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
 .chart .ct{font-size:11.5px;color:var(--txt-3);margin-bottom:2px}
 .bar-row{display:flex;align-items:center;gap:9px;font-size:11.5px}
 .bar-row .y{width:40px;color:var(--txt-2);font-family:Consolas,monospace}
+/* 按月统计 / 年份展开出来的月份行：标签是 2024-07，比纯年份宽 */
+.bar-row .y.wide{width:64px}
+/* 展开箭头（占位也要渲染，否则各列对不齐） */
+.bar-row .ycaret{width:12px;flex:none;font-size:10px;line-height:1;color:var(--txt-3);text-align:center}
+.bar-row .ycaret.clickable{cursor:pointer;user-select:none}
+.bar-row .ycaret.clickable:hover{color:var(--accent)}
+.bar-row .ycaret.open{color:var(--accent)}
+/* 年份行「整行可展开」：原来是只能点左边的小箭头。内边距与负外边距相互抵消，列宽/行距不变 */
+.bar-row.expandable{cursor:pointer;padding:2px 4px;margin:-2px -4px;border-radius:6px}
+.bar-row.expandable:hover{background:var(--hover-bg)}
+.bar-row.expandable:hover .y{color:var(--txt)}
+.bar-row.expandable:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+/* 年份下面展开出来的月份行：缩进 + 淡一点，和年份区分开 */
+.bar-row.child .y{margin-left:10px;color:var(--txt-3)}
+.bar-row.child .bar-fill{opacity:.68}
 .bar-track{flex:1;height:14px;background:var(--bg-3);border-radius:5px;overflow:hidden}
 .bar-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .5s}
 .bar-row .vv{width:92px;text-align:right;color:var(--txt-2);font-family:Consolas,monospace}
@@ -421,6 +438,8 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
 .lib-month .mcount{flex:none;font-weight:400;font-size:10.5px;opacity:.85}
 .lib-file{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 22px;font-size:11.5px;color:var(--txt-2)}
 .lib-file:hover{background:var(--hover-bg);color:var(--txt)}
+/* 文件行整行可勾选（最小单元、不可再展开 ⇒ 点击无歧义） */
+.lib-file.clickable{cursor:pointer}
 .lib-file .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Consolas,monospace}
 .lib-file .fsz{font-size:10.5px;color:var(--txt-3);font-family:Consolas,monospace;white-space:nowrap}
 /* 文件修改时间：等宽数字便于整列对齐 */

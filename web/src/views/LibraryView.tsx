@@ -1,9 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../store';
 import { api } from '../api/client';
-import type { LibraryAnime, LibraryFile, LibrarySubDir } from '../types';
-import { allLibraryFiles, compareByEpisode, formatDateTime, formatSize, formatTime, highlight, joinWinPath, matchAnime, pad, padEpisode, parseQuery } from '../utils';
+import type { LibraryAnime, LibraryFile, LibrarySubDir, MonthStat } from '../types';
+import {
+  allLibraryFiles, compareByEpisode, formatDateTime, formatSize, formatTime, highlight,
+  isTextSelecting, joinWinPath, matchAnime, pad, padEpisode, parseQuery
+} from '../utils';
 import { RenameDialog } from '../components/Dialogs';
 import { EntryMoveHost, type MoveEntry } from '../components/EntryMove';
 
@@ -28,6 +31,8 @@ function LibToolbar() {
   const setLibQuery = useApp(s => s.setLibQuery);
   const chartMode = useApp(s => s.chartMode);
   const setChartMode = useApp(s => s.setChartMode);
+  const chartBucket = useApp(s => s.chartBucket);
+  const setChartBucket = useApp(s => s.setChartBucket);
   const rebuildIndex = useApp(s => s.rebuildIndex);
   const serviceOnline = useApp(s => s.serviceOnline);
   const libraryLoading = useApp(s => s.libraryLoading);
@@ -48,6 +53,10 @@ function LibToolbar() {
       <div className="seg" id="segChart">
         <span className={chartMode === 'count' ? 'on' : ''} onClick={() => setChartMode('count')}>番剧数量</span>
         <span className={chartMode === 'size' ? 'on' : ''} onClick={() => setChartMode('size')}>占用空间</span>
+      </div>
+      <div className="seg" id="segBucket" title="统计粒度：按年份（每年一部/一片）或按月份（归档目录本来就是 年\月）">
+        <span className={chartBucket === 'year' ? 'on' : ''} onClick={() => setChartBucket('year')}>按年份</span>
+        <span className={chartBucket === 'month' ? 'on' : ''} onClick={() => setChartBucket('month')}>按月份</span>
       </div>
       <button
         onClick={() => void rebuildIndex()}
@@ -254,7 +263,7 @@ function LibListPanel() {
               一个年份动辄上千个文件，折叠时不建 DOM，所以打开很快；检索时会自动全部展开。
               <br />
               ℹ 想只移动其中几个：勾选文件行左侧的方框 → 卡片头会出现「<b>↗ 移动选中的 N 个</b>」
-              （底部也会浮出一条操作条）。
+              （底部也会浮出一条操作条）。<b>点文件行的任意位置都能勾选</b>，不用精准点那个小方框。
             </div>
             {groups.map(([y, months]) => {
               const fileCount = Array.from(months.values()).reduce(
@@ -644,14 +653,28 @@ function FileRowBase({
   onRevert: () => void;
   onMove: () => void;
 }) {
+  /**
+   * 整行都能勾选（用户要求）。
+   *
+   * 文件行是**最小单元**，本身不可再展开 ⇒ 行上的点击不存在歧义，没必要逼用户精准点那个 13px 的小方框。
+   *
+   * ⚠ 三个坑：
+   *  ① 行内三个按钮（播放 / 撤回 / 移动）必须 `stopPropagation`，否则点按钮会顺手改掉勾选；
+   *  ② 复选框自己必须 `stopPropagation`（`TriCheck` 内已做）—— 否则触发两次 = 看起来「勾不上」；
+   *  ③ 正在拖选文件名时不算点击（想复制一段文件名，结果被勾上了）。
+   */
+  const rowClick = (): void => {
+    if (isTextSelecting()) return;
+    onPick(file.fullPath, !checked);
+  };
   return (
-    <div className={`lib-file${checked ? ' picked' : ''}`}>
+    <div className={`lib-file${checked ? ' picked' : ''} clickable`} onClick={rowClick}>
       <TriCheck
         className="fchk"
         checked={checked}
         partial={false}
         onToggle={on => onPick(file.fullPath, on)}
-        title="勾选后可批量移动（底部会出现批量操作条）"
+        title="勾选后可批量移动（也可以直接点这一行任意位置）"
       />
       <span className="ep-badge">{padEpisode(file.episode) || '—'}</span>
       <span
@@ -663,7 +686,7 @@ function FileRowBase({
       <span className="ftime" title={`修改时间：${formatTime(file.mtime)}`}>{formatDateTime(file.mtime)}</span>
       <button
         className="mini play"
-        onClick={onPlay}
+        onClick={e => { e.stopPropagation(); onPlay(); }}
         disabled={!serviceOnline}
         title={serviceOnline ? '调用 Windows 默认播放器' : '请先启动本地服务'}
       >
@@ -671,7 +694,7 @@ function FileRowBase({
       </button>
       <button
         className="mini rev"
-        onClick={onRevert}
+        onClick={e => { e.stopPropagation(); onRevert(); }}
         disabled={!serviceOnline || !file.revertable}
         title={
           !serviceOnline
@@ -685,7 +708,7 @@ function FileRowBase({
       </button>
       <button
         className="mini"
-        onClick={onMove}
+        onClick={e => { e.stopPropagation(); onMove(); }}
         disabled={!serviceOnline}
         title={serviceOnline ? '归错位置了？直接移到另一部番剧（真实移动，不必先撤回再归档）' : '请先启动本地服务'}
       >
@@ -743,11 +766,77 @@ function TriCheck({
     />
   );
 }
+interface StatsRow {
+  key: string;
+  label: string;
+  animeCount: number;
+  fileCount: number;
+  totalSize: number;
+  /** 0 = 年份（或按月份模式的平铺行），1 = 年份下面展开出来的月份行 */
+  depth: 0 | 1;
+  /** 该年实际有归档记录的月份数（>0 才可展开） */
+  childCount?: number;
+  year?: number;
+}
+
+/** 统计/图表用的一行（年份行或月份行） */
+function statRowLabel(year: number, month: number): string {
+  return month > 0 ? `${year}-${pad(month)}` : `${year}-未知`;
+}
+
 function LibStatsPanel() {
   const library = useApp(s => s.library);
   const chartMode = useApp(s => s.chartMode);
+  const chartBucket = useApp(s => s.chartBucket);
+  /** 展开的年份；null = 用户还没手动点过 → 默认展开最新的一年 */
+  const [openYears, setOpenYears] = useState<number[] | null>(null);
 
-  if (!library) {
+  const stats = library?.stats;
+  const yearList = stats?.years;
+
+  /*
+   * 按月聚合：新索引直接带 stats.months；
+   * 旧索引（还没点「↻ 重建索引」）现场按 anime 算一遍 —— 否则月份行会显示不出来，
+   * 用户会以为功能没做。两边的过滤/求和口径必须与服务端 computeStats 完全一致：
+   * 排除特殊目录、year 为 null 的不统计、体积含子目录里的文件。
+   */
+  const months = useMemo(() => {
+    if (!library) return [];
+    if (library.stats.months?.length) return library.stats.months;
+    const map = new Map<string, MonthStat>();
+    library.anime.forEach(a => {
+      const year = a.year;
+      if (a.special || year === null) return;
+      const month = a.month ?? 0;
+      const fs = allLibraryFiles(a);
+      const cur = map.get(`${year}-${month}`)
+        ?? { year, month, animeCount: 0, fileCount: 0, totalSize: 0 };
+      cur.animeCount += 1;
+      cur.fileCount += fs.length;
+      cur.totalSize += fs.reduce((x, f) => x + f.size, 0);
+      map.set(`${year}-${month}`, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month));
+  }, [library]);
+
+  /** 年份 → 该年实际存在的月份（只列真实存在的月份，不留空的 12 个月） */
+  const monthsByYear = useMemo(() => {
+    const m = new Map<number, MonthStat[]>();
+    months.forEach(x => {
+      const arr = m.get(x.year) ?? [];
+      arr.push(x);
+      m.set(x.year, arr);
+    });
+    return m;
+  }, [months]);
+
+  // 默认展开最新的一年：一进页面就能看到「年 + 月」两层，点一下即可收起
+  const expandedYears = useMemo(() => {
+    if (openYears) return openYears;
+    return yearList?.length ? [yearList[0].year] : [];
+  }, [openYears, yearList]);
+
+  if (!library || !stats) {
     return (
       <section className="panel">
         <div className="panel-head"><span>📊 统计与图表</span><span className="hint">索引未加载</span></div>
@@ -756,21 +845,103 @@ function LibStatsPanel() {
     );
   }
 
-  const stats = library.stats;
+  const isMonth = chartBucket === 'month';
+  const toggleYear = (y: number): void => {
+    const cur = expandedYears.includes(y);
+    setOpenYears(cur ? expandedYears.filter(x => x !== y) : [...expandedYears, y]);
+  };
 
-  // 图表使用「正式归档」的番剧，**不含**特殊目录
-  const byYear = new Map<number, { count: number; size: number }>();
-  library.anime.filter(a => !a.special).forEach(a => {
-    if (!a.year) return;
-    const cur = byYear.get(a.year) ?? { count: 0, size: 0 };
-    cur.count += 1;
-    cur.size += allLibraryFiles(a).reduce((x, f) => x + f.size, 0);
-    byYear.set(a.year, cur);
+  const monthRowOf = (m: MonthStat): StatsRow => ({
+    key: `${m.year}-${m.month}`,
+    label: statRowLabel(m.year, m.month),
+    animeCount: m.animeCount,
+    fileCount: m.fileCount,
+    totalSize: m.totalSize,
+    depth: 1,
+    year: m.year
   });
 
-  const years = Array.from(byYear.keys()).sort((a, b) => b - a);
-  const val = (y: number) => (chartMode === 'count' ? byYear.get(y)!.count : byYear.get(y)!.size);
-  const max = years.length ? Math.max(...years.map(val)) : 1;
+  /** 年份模式：年份行 + （展开时）该年的月份行；月份模式：所有月份平铺 */
+  const yearRows: StatsRow[] = (yearList ?? []).map(y => ({
+    key: String(y.year),
+    label: String(y.year),
+    animeCount: y.animeCount,
+    fileCount: y.fileCount,
+    totalSize: y.totalSize,
+    depth: 0,
+    childCount: (monthsByYear.get(y.year) ?? []).length,
+    year: y.year
+  }));
+
+  const rows: StatsRow[] = isMonth
+    // 平铺模式：月份就是顶层行（不能带 depth=1，否则会被套上「子行」的缩进样式）
+    ? months.map(m => ({ ...monthRowOf(m), depth: 0 }))
+    : yearRows.flatMap(r => (
+      r.year !== undefined && expandedYears.includes(r.year)
+        ? [r, ...(monthsByYear.get(r.year) ?? []).map(monthRowOf)]
+        : [r]
+    ));
+
+  const val = (r: StatsRow): number => (chartMode === 'count' ? r.animeCount : r.totalSize);
+  // 比例尺以「年份」为基准（年份 = 其各月之和，必然 ≥ 月份），月份模式下以月份为基准
+  const scaleRows = isMonth ? rows : yearRows;
+  const max = scaleRows.length ? Math.max(...scaleRows.map(val)) : 1;
+
+  const unit = isMonth ? '月份' : '年份';
+  const bucketCount = isMonth ? months.length : yearRows.length;
+  const chartTitle = isMonth
+    ? (chartMode === 'count' ? '各月份番剧数量（部）' : '各月份占用空间')
+    : (chartMode === 'count' ? '各年份番剧数量（部）' : '各年份占用空间');
+  const detailTitle = isMonth ? '月份明细' : '年份明细';
+  const hint = isMonth
+    ? '· 按归档目录的「年\\月」层级统计'
+    : '· 点年份整行即可展开该年的月份（只列真实存在的月份）';
+
+  /** 该行可展开的年份（null = 不可展开：月份行、平铺模式的月份行、没有归档月份的年份） */
+  const expandableYear = (r: StatsRow): number | null =>
+    (!isMonth && r.depth === 0 && r.childCount && r.year !== undefined ? r.year : null);
+
+  /**
+   * 展开箭头：**只做展示**。
+   *
+   * 事件挂在整行上（用户要求「点年份整一条都能展开」），箭头再单独绑一次就会连点两下 = 看起来没反应。
+   * 不可展开的行也要渲染占位，否则各列对不齐。
+   */
+  const caretOf = (r: StatsRow) => {
+    const y = expandableYear(r);
+    if (y === null) return <span className="ycaret" aria-hidden="true" />;
+    const open = expandedYears.includes(y);
+    return (
+      <span className={'ycaret clickable' + (open ? ' open' : '')} aria-hidden="true">
+        {open ? '▾' : '▸'}
+      </span>
+    );
+  };
+
+  /**
+   * 整行可点：点年份行的**任意位置**（标签 / 柱子 / 数值 / 空白）都能展开或收起该年的月份。
+   * 用 role=button + 键盘回车/空格，让「整行可点」对键盘操作也可用。
+   */
+  const rowPropsOf = (r: StatsRow) => {
+    const y = expandableYear(r);
+    if (y === null) return {};
+    const open = expandedYears.includes(y);
+    return {
+      role: 'button' as const,
+      tabIndex: 0,
+      title: `${open ? '收起' : '展开'} ${r.label} 年的 ${r.childCount} 个月份（点这一行任意位置都行）`,
+      onClick: () => toggleYear(y),
+      onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleYear(y); }
+      }
+    };
+  };
+
+  const labelCls = (r: StatsRow): string => 'y' + (isMonth || r.depth === 1 ? ' wide' : '');
+
+  /** 行的类名：可展开的年份行加 `expandable`（悬停高亮 + 手型光标） */
+  const rowCls = (r: StatsRow): string =>
+    'bar-row' + (r.depth === 1 ? ' child' : '') + (expandableYear(r) === null ? '' : ' expandable');
 
   return (
     <section className="panel">
@@ -785,38 +956,43 @@ function LibStatsPanel() {
           <div className="stat-card"><div className="k">总占用空间</div><div className="v">{formatSize(stats.totalSize)}</div></div>
           <div className="stat-card"><div className="k">可撤回文件</div><div className="v">{stats.revertableCount}<small>个</small></div></div>
           <div className="stat-card"><div className="k">特殊目录</div><div className="v">{stats.specialCount}<small>个</small></div></div>
-          <div className="stat-card"><div className="k">覆盖年份</div><div className="v">{years.length}<small>年</small></div></div>
+          <div className="stat-card" title={isMonth ? '有归档记录的月份数' : '有归档记录的年份数'}>
+            <div className="k">覆盖{unit}</div>
+            <div className="v">{bucketCount}<small>{isMonth ? '个月' : '年'}</small></div>
+          </div>
         </div>
 
         <div className="chart">
           <div className="ct">
-            {chartMode === 'count' ? '各年份番剧数量（部）' : '各年份占用空间'}
-            <span style={{ marginLeft: 8, color: 'var(--txt-3)' }}>· 不含 _未识别 / _待确认</span>
+            {chartTitle}
+            <span style={{ marginLeft: 8, color: 'var(--txt-3)' }}>{hint}</span>
           </div>
-          {!years.length && <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>暂无数据</div>}
-          {years.map(y => (
-            <div className="bar-row" key={y}>
-              <span className="y">{y}</span>
+          {!rows.length && <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>暂无数据</div>}
+          {rows.map(r => (
+            <div className={rowCls(r)} key={r.key} {...rowPropsOf(r)}>
+              {caretOf(r)}
+              <span className={labelCls(r)}>{r.label}</span>
               <div className="bar-track">
-                <div className="bar-fill" style={{ width: `${Math.max(4, (val(y) / max) * 100)}%` }} />
+                <div className="bar-fill" style={{ width: `${Math.max(4, (val(r) / max) * 100)}%` }} />
               </div>
               <span className="vv">
-                {chartMode === 'count' ? `${byYear.get(y)!.count} 部` : formatSize(byYear.get(y)!.size)}
+                {chartMode === 'count' ? `${r.animeCount} 部` : formatSize(r.totalSize)}
               </span>
             </div>
           ))}
         </div>
 
         <div className="chart">
-          <div className="ct">年份明细</div>
-          {!stats.years.length && <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>暂无数据</div>}
-          {stats.years.map(y => (
-            <div className="bar-row" key={y.year}>
-              <span className="y">{y.year}</span>
+          <div className="ct">{detailTitle}</div>
+          {!rows.length && <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>暂无数据</div>}
+          {rows.map(r => (
+            <div className={rowCls(r)} key={r.key} {...rowPropsOf(r)}>
+              {caretOf(r)}
+              <span className={labelCls(r)}>{r.label}</span>
               <span style={{ flex: 1, color: 'var(--txt-2)' }}>
-                {y.animeCount} 部 · {y.fileCount} 个文件
+                {r.animeCount} 部 · {r.fileCount} 个文件
               </span>
-              <span className="vv">{formatSize(y.totalSize)}</span>
+              <span className="vv">{formatSize(r.totalSize)}</span>
             </div>
           ))}
         </div>

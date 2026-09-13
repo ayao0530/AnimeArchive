@@ -11,14 +11,16 @@ import { scanSource } from './core/scanner';
 import { groupItems } from './core/grouper';
 import { buildPlan } from './core/planner';
 import { executePlan, isExecuteRunning, requestExecuteStop, revert } from './core/executor';
-import { buildLibraryIndex } from './core/indexer';
+import { buildLibraryIndex, computeStats } from './core/indexer';
 import { moveInLibrary, moveManyInLibrary, canClimbTo } from './core/libraryMove';
 import { revealInExplorer, explorerArgs } from './core/explorer';
 import { exists, isInside, joinWinPath } from './fsx/fsx';
 import { timeAdjust } from './util/timesignal';
 import { buildBangumiQueries, clearNormalizeCache, normalizeName } from './core/normalizer';
 import { compareByEpisode } from './core/parser';
+import { createPageSessions } from './core/pageSessions';
 import { aliasKey, similarity, similarityKeyed, strictKey, toSimplified } from './util/text';
+import type { LibraryAnime, LibraryFile } from './types';
 
 const results: Array<{ id: string; name: string; pass: boolean; detail: string }> = [];
 
@@ -768,6 +770,110 @@ async function main(): Promise<void> {
   // 对照：按文件名字符串排会得到 01 / 14 / 24v2 / 25 / 02 / 10 / 24（就是用户看到的现象）
   check('A39', '媒体库文件按集数数字排：多字幕组混排时 01 后面跟 02 而不是 14；无集数的排最后',
     gotOrder === wantOrder, `实际：${gotOrder}`);
+
+  /* ---------- A40 「关掉最后一个网页 → 自动关闭服务」的会话登记 ---------- */
+  // 这条锁的是「什么时候才该关服务」：
+  //   ① 没登记过的会话 id 一律忽略（防止别的工具一个请求就把服务关掉）
+  //   ② 只关掉多个标签页里的一个 → 不关
+  //   ③ 最后一个页面关掉后，宽限期内重新登记（= 刷新页面）→ 取消关闭
+  //   ④ 真的没页面了 → 宽限期到点才关（且只关一次）
+  //   ⑤ 设置里关掉该功能 → 永不自动关
+  const delay = (ms: number): Promise<void> => new Promise(res => setTimeout(res, ms));
+  {
+    let closed = 0;
+    const s = createPageSessions({ graceMs: 40, onCloseService: () => { closed++; } });
+    s.open('tab-a');
+    s.open('tab-b');
+    const unknownAccepted = s.close('never-opened');       // ①
+    s.close('tab-a');                                      // ②
+    const pendingAfterOne = s.pending();
+    await delay(90);
+    const afterOneTab = closed;                            // 仍应为 0
+
+    s.close('tab-b');                                      // ③ 最后一个页面
+    const pendingAfterLast = s.pending();                  // 应为 true（已进倒计时）
+    s.open('tab-b-reload');                                // 刷新：宽限期内重新登记
+    const pendingAfterReload = s.pending();                // 应为 false（已取消）
+    await delay(90);
+    const afterReload = closed;                            // 仍应为 0
+
+    s.close('tab-b-reload');                               // ④ 真的没页面了
+    await delay(90);
+    const afterLast = closed;                              // 应为 1
+    await delay(60);
+    const notTwice = closed === 1;                         // 不应重复触发
+
+    // ⑤ 设置里关掉「关闭网页时自动关闭服务」
+    let closedOff = 0;
+    const off = createPageSessions({ graceMs: 20, enabled: () => false, onCloseService: () => { closedOff++; } });
+    off.open('only');
+    off.close('only');
+    await delay(60);
+
+    check('A40', '关掉最后一个网页才自动关服务：未登记会话忽略 / 多标签只关一个不关 / 刷新取消 / 开关关闭时不关',
+      unknownAccepted === false && afterOneTab === 0 && pendingAfterOne === false &&
+      pendingAfterLast === true && pendingAfterReload === false &&
+      afterReload === 0 && afterLast === 1 && notTwice && closedOff === 0,
+      `未知会话受理=${unknownAccepted}；关一个标签后触发=${afterOneTab}（pending=${pendingAfterOne}）；` +
+      `最后一个页面关闭后 pending=${pendingAfterLast}；刷新后 pending=${pendingAfterReload}、触发=${afterReload}；` +
+      `真关闭触发=${afterLast}（重复触发=${!notTwice}）；开关关闭时触发=${closedOff}`);
+  }
+
+  /* ---------- A41 统计：「按年份」之外还要能「按月份」 ---------- */
+  // 归档目录本身就是 年\月 两级，月度统计能看出「当季追番」的分布。
+  // 锁：分桶正确、年降序+月降序、子目录里的文件也计入、特殊目录不计入、两种粒度合计一致。
+  const mkFile = (name: string, size: number, rev = false): LibraryFile => ({
+    uid: `uid-${name}`, name, fullPath: `X:\\lib\\${name}`, size, type: 'video',
+    episode: null, originPath: rev ? `X:\\src\\${name}` : null, revertable: rev, mtime: ''
+  });
+  const mkAnime = (
+    id: string,
+    year: number | null,
+    month: number | null,
+    files: LibraryFile[],
+    opts: { special?: boolean; spFiles?: LibraryFile[] } = {}
+  ): LibraryAnime => ({
+    id, zhName: id, aliases: [], year, month, bangumiId: null, cover: '',
+    relPath: `${year}\\${month}\\${id}`,
+    totalSize: files.reduce((a, f) => a + f.size, 0),
+    fileCount: files.length,
+    files,
+    subDirs: (opts.spFiles ?? []).length
+      ? [{
+        dir: 'SP', files: opts.spFiles!, fullPath: `X:\\lib\\${id}\\SP`,
+        originPath: null, revertable: false,
+        totalSize: opts.spFiles!.reduce((a, f) => a + f.size, 0)
+      }]
+      : [],
+    special: opts.special === true
+  });
+
+  const statAnime: LibraryAnime[] = [
+    mkAnime('A', 2024, 1, [mkFile('a-01.mp4', 100, true), mkFile('a-02.mp4', 200)]),
+    mkAnime('B', 2024, 1, [mkFile('b-01.mp4', 50)]),
+    mkAnime('C', 2024, 7, [mkFile('c-01.mp4', 10), mkFile('c-02.mp4', 10), mkFile('c-03.mp4', 10)]),
+    mkAnime('D', 2023, 10, [mkFile('d-01.mp4', 7)], { spFiles: [mkFile('d-sp.mp4', 12)] }),
+    mkAnime('F', 2025, null, [mkFile('f-01.mp4', 5)]),
+    mkAnime('E', 2024, 7, [mkFile('e-01.mp4', 999)], { special: true })
+  ];
+  const st = computeStats(statAnime);
+  const mKey = st.months.map(m => `${m.year}-${m.month}`).join(',');
+  const m = (y: number, mm: number) => st.months.find(x => x.year === y && x.month === mm);
+  const sumMonths = (pick: (x: typeof st.months[number]) => number): number =>
+    st.months.reduce((a, x) => a + pick(x), 0);
+  check('A41', '统计按月聚合：分桶正确 + 年/月降序 + 子目录计入 + 特殊目录排除 + 两种粒度合计一致',
+    mKey === '2025-0,2024-7,2024-1,2023-10' &&
+    m(2024, 1)?.animeCount === 2 && m(2024, 1)?.fileCount === 3 && m(2024, 1)?.totalSize === 350 &&
+    m(2024, 7)?.animeCount === 1 && m(2024, 7)?.totalSize === 30 &&
+    m(2023, 10)?.fileCount === 2 && m(2023, 10)?.totalSize === 19 &&
+    st.specialCount === 1 && st.animeCount === 5 && st.fileCount === 9 && st.totalSize === 404 &&
+    st.revertableCount === 1 &&
+    sumMonths(x => x.animeCount) === st.animeCount &&
+    sumMonths(x => x.fileCount) === st.fileCount &&
+    sumMonths(x => x.totalSize) === st.totalSize,
+    `月份桶=${mKey}；2024-01=${JSON.stringify(m(2024, 1))}；2023-10=${JSON.stringify(m(2023, 10))}；` +
+    `合计 部=${sumMonths(x => x.animeCount)}/${st.animeCount}、文件=${sumMonths(x => x.fileCount)}/${st.fileCount}、` +
+    `体积=${sumMonths(x => x.totalSize)}/${st.totalSize}`);
 
   /* ---------- 汇总 ---------- */
   const failed = results.filter(r => !r.pass);

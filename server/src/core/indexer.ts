@@ -14,6 +14,7 @@ import {
   LibraryIndex,
   LibraryStats,
   LibrarySubDir,
+  MonthStat,
   YearStat
 } from '../types';
 import { VIDEO_EXTS, toLongPath, DEFAULT_FS_CONCURRENCY } from '../fsx/fsx';
@@ -297,6 +298,12 @@ function findAlias(
   return null;
 }
 
+/**
+ * 统计（图表用）。**不含**特殊目录（`_未识别` / `_待确认`）。
+ *
+ * 同时给出两种粒度：`years`（按年份）与 `months`（按年+月）——
+ * 归档目录本身就是 `{年份}\{月份}\` 两级，月度统计能看出「当季追番」的分布。
+ */
 export function computeStats(anime: LibraryAnime[]): LibraryStats {
   const normal = anime.filter(a => !a.special);
   const specials = anime.filter(a => a.special);
@@ -304,14 +311,27 @@ export function computeStats(anime: LibraryAnime[]): LibraryStats {
 
   const allFiles = normal.flatMap(filesOf);
   const byYear = new Map<number, YearStat>();
+  const byMonth = new Map<string, MonthStat>();
   normal.forEach(a => {
     if (a.year === null) return;
     const fs = filesOf(a);
+    const fileCount = fs.length;
+    const totalSize = fs.reduce((x, f) => x + f.size, 0);
+
     const cur = byYear.get(a.year) ?? { year: a.year, animeCount: 0, fileCount: 0, totalSize: 0 };
     cur.animeCount += 1;
-    cur.fileCount += fs.length;
-    cur.totalSize += fs.reduce((x, f) => x + f.size, 0);
+    cur.fileCount += fileCount;
+    cur.totalSize += totalSize;
     byYear.set(a.year, cur);
+
+    // 月份缺失（手工建的目录等）归到 month = 0 的兜底桶，界面上显示为「YYYY-未知」
+    const month = a.month ?? 0;
+    const key = `${a.year}-${month}`;
+    const mc = byMonth.get(key) ?? { year: a.year, month, animeCount: 0, fileCount: 0, totalSize: 0 };
+    mc.animeCount += 1;
+    mc.fileCount += fileCount;
+    mc.totalSize += totalSize;
+    byMonth.set(key, mc);
   });
 
   return {
@@ -320,6 +340,7 @@ export function computeStats(anime: LibraryAnime[]): LibraryStats {
     totalSize: allFiles.reduce((a, f) => a + f.size, 0),
     revertableCount: allFiles.filter(f => f.revertable).length,
     specialCount: specials.length,
-    years: Array.from(byYear.values()).sort((a, b) => b.year - a.year)
+    years: Array.from(byYear.values()).sort((a, b) => b.year - a.year),
+    months: Array.from(byMonth.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month))
   };
 }

@@ -108,6 +108,17 @@ export function formatStamp(iso: string | null | undefined): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/* ---------------- 交互 ---------------- */
+
+/**
+ * 「整行可点 = 勾选」的行点击守卫：正在拖选文本时不算「点击这一行」。
+ *
+ * 文件名经常要拖选一段去检索，若把拖选也当成点击，就会顺手把这一行勾上。
+ */
+export function isTextSelecting(): boolean {
+  return !!window.getSelection()?.toString();
+}
+
 /* ---------------- 状态 ---------------- */
 
 /** 数据来源的友好标签 */

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApp, type ArchiveFilter } from '../store';
 import type { AnimeGroup, GroupStatus } from '../types';
 import {
   STATUS_CLASS, STATUS_COLOR, STATUS_TEXT, entryTargetName, formatDateTime, formatSize, formatStamp, formatTime,
-  groupTargetDir, highlight, matchGroup, pad, padEpisode, parseQuery, sourceLabel
+  groupTargetDir, highlight, isTextSelecting, matchGroup, pad, padEpisode, parseQuery, sourceLabel
 } from '../utils';
 import { ConflictDialog, MoveItemDialog, RenameDialog, ResolveDialog, type MoveItemTarget } from '../components/Dialogs';
 import { EntryMoveHost, usePlanDirs, type MoveEntry } from '../components/EntryMove';
@@ -46,6 +46,8 @@ function ExecProgressNotice() {
   const undoBatch = useApp(s => s.undoBatch);
   const toggleLog = useApp(s => s.toggleLog);
   const plan = useApp(s => s.plan);
+  // 关闭网页时服务会自动关闭（可在 ⚙ 设置里关掉）→ 文案要说法一致
+  const autoClose = useApp(s => s.config?.shutdownOnPageClose !== false);
 
   if (!st) return null;
   const handled = st.done + st.failed + st.skipped;
@@ -87,7 +89,9 @@ function ExecProgressNotice() {
           </span>
           <span className="spacer" />
           <span style={{ fontSize: 11.5, opacity: .85 }}>
-            关掉/刷新页面不影响：任务在本地服务里跑，重新打开会自动接上
+            {autoClose
+              ? '关掉网页会先停下载入的批次并关闭服务（可在 ⚙ 设置里关掉）；刷新页面不受影响'
+              : '关掉/刷新页面不影响：任务在本地服务里跑，重新打开会自动接上'}
           </span>
           <button className="mini stop" onClick={() => void stop()}>⏹ 停止归档</button>
         </div>
@@ -367,6 +371,95 @@ function LazyFooter({ shown, total, hasMore, onMore }: {
    左侧：原始文件区
    ========================================================= */
 
+/**
+ * 「空列表」提示：不能一律写「尚未扫描」。
+ *
+ * 用户扫描完发现源目录里没有新视频时，界面原来仍旧显示「尚未扫描」
+ * ⇒ 看起来像扫描压根没跑。这里改成根据 `scanInfo` / 上次扫描快照**分档说明**：
+ *  ① 上次结果里的文件已全部归档完成 → 告诉他「都处理完了」，并给「扫描新文件」
+ *  ② 扫过了但一个视频都没找到 → 报出扫描数字（忽略/排除多少）+ 该检查什么
+ *  ③ 扫过了、也扫到了文件，但没形成分组 → 说明并给出重新扫描入口
+ *  ④ 真的没扫过 → 保留原来的引导文案
+ *
+ * `variant='source'`（原始文件区）与 `'target'`（归档结果区 / 对照列表）只是措辞不同，
+ * 判定逻辑完全一样。
+ */
+function EmptyHint({ variant }: { variant: 'source' | 'target' }) {
+  const scanInfo = useApp(s => s.scanInfo);
+  const snapshot = useApp(s => s.snapshot);
+  const busy = useApp(s => s.busy);
+  const scan = useApp(s => s.scan);
+  const isSrc = variant === 'source';
+
+  /** 为真时在提示下方给一个「重新扫描」入口 */
+  let title: string;
+  let detail: ReactNode;
+  let scanBtn = false;
+
+  if (snapshot && snapshot.groups === 0) {
+    // ① 服务端快照被裁剪成空 = 上次扫出来的项已经全部归档完成
+    title = isSrc ? '上次扫描的文件已全部归档完成' : '没有待归档的目标';
+    detail = (
+      <>
+        上次扫描时间 <span className="mono">{formatStamp(snapshot.savedAt)}</span>。
+        <br />
+        把新文件放进源目录后，点 <code>↻ 扫描并生成方案</code> 即可。
+      </>
+    );
+    scanBtn = true;
+  } else if (scanInfo) {
+    // ② / ③ 本次会话确实扫过了 —— 按扫描结果里的数字说清楚
+    const { files, dirs, skippedNonVideo, excluded } = scanInfo;
+    const nums = `扫描结果：视频 ${files} 个 / 文件夹 ${dirs} 个` +
+      (skippedNonVideo ? ` · 已忽略非视频 ${skippedNonVideo} 个` : '') +
+      (excluded ? ` · 已排除归档目录内 ${excluded} 项` : '');
+    if (!files) {
+      title = isSrc ? '扫描完成，但源目录里没有视频文件' : '没有可归档的目标';
+      detail = (
+        <>
+          {nums}。
+          <br />
+          可能原因：已经全部归档过了（归档后的文件在归档根目录里，不再重复扫描）；
+          或者上面「源目录」填的不是待归档目录。
+          <br />
+          确认源目录里有新文件后，点 <code>↻ 扫描并生成方案</code> 再扫一次。
+        </>
+      );
+    } else {
+      title = isSrc ? '扫描完成，但没有可归档的分组' : '没有可归档的目标';
+      detail = (
+        <>
+          {nums}，但都没有形成归档分组（多数情况是这些文件已经处理过了）。
+          <br />
+          若刚往源目录里放了新文件，再点一次 <code>↻ 扫描并生成方案</code>。
+        </>
+      );
+    }
+    scanBtn = true;
+  } else {
+    // ④ 真的还没扫过
+    title = isSrc ? '尚未扫描' : '没有匹配的归档目标';
+    detail = isSrc ? (
+      <>填写上方「源目录」与「归档根目录」，点击 <code>↻ 扫描并生成方案</code></>
+    ) : (
+      <>检索条件可能过于严格</>
+    );
+  }
+
+  return (
+    <div className="empty">
+      {title}
+      <br />
+      {detail}
+      {scanBtn && (
+        <div style={{ marginTop: 12 }}>
+          <button className="mini" onClick={() => void scan()} disabled={!!busy}>↻ 扫描并生成方案</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SourcePanel() {
   const groups = useApp(s => s.groups);
   const query = useApp(s => s.query);
@@ -394,12 +487,7 @@ function SourcePanel() {
         id="sourceList"
         onScroll={e => { if (lazy.hasMore && nearBottom(e.currentTarget)) lazy.more(); }}
       >
-        {!groups.length && (
-          <div className="empty">
-            尚未扫描<br />
-            填写上方「源目录」与「归档根目录」，点击 <code>↻ 扫描并生成方案</code>
-          </div>
-        )}
+        {!groups.length && <EmptyHint variant="source" />}
         {groups.length > 0 && !list.length && (
           <div className="empty">
             没有匹配的文件组<br />
@@ -626,12 +714,19 @@ function GroupCard({ group, terms, done }: { group: AnimeGroup; terms: string[];
             const isPicked = pickedSet.has(it.scanItem.path);
             const cls = [isOverridden ? 'overridden' : '', isPicked ? 'picked' : ''].filter(Boolean).join(' ');
             return (
-              <li key={`${group.groupId}-${i}`} className={cls || undefined}>
+              <li
+                key={`${group.groupId}-${i}`}
+                className={cls || undefined}
+                /* 整行可勾选（用户要求）：条目是**最小单元**，本身不可再展开 ⇒ 点行上的任意位置都算勾选 */
+                onClick={() => { if (!isTextSelecting()) togglePick(it.scanItem.path); }}
+                title="点这一行任意位置即可勾选（行内的按钮不受影响）"
+              >
                 <input
                   type="checkbox"
                   className="pick-item"
                   checked={isPicked}
-                  title="勾选后可与其它文件一起「批量分开归档」"
+                  title="勾选后可与其它文件一起「批量分开归档」（也可以直接点这一行任意位置）"
+                  onClick={e => e.stopPropagation()}
                   onChange={() => togglePick(it.scanItem.path)}
                   style={{ accentColor: 'var(--accent)', flex: 'none' }}
                 />
@@ -664,13 +759,16 @@ function GroupCard({ group, terms, done }: { group: AnimeGroup; terms: string[];
                     <button
                       className="mini ghost"
                       title="取消单独调整，该文件回到原分组"
-                      onClick={() => void removeItemOverride(it.scanItem.path)}
+                      onClick={e => { e.stopPropagation(); void removeItemOverride(it.scanItem.path); }}
                     >↩</button>
                   )}
                   <button
                     className="mini ghost"
                     title="把该文件/文件夹单独归到其它番剧（勾选多个可批量）"
-                    onClick={() => setMoveItems([{ path: it.scanItem.path, name: it.scanItem.name, isDir: it.scanItem.isDir }])}
+                    onClick={e => {
+                      e.stopPropagation();
+                      setMoveItems([{ path: it.scanItem.path, name: it.scanItem.name, isDir: it.scanItem.isDir }]);
+                    }}
                   >↗</button>
                 </span>
               </li>
@@ -830,6 +928,9 @@ function TargetPanel() {
     [groups, pq, filter, done]
   );
 
+  /* 一个分组都没有（不是被筛选掉）→ 用「按真实原因分档」的提示，别一律说「检索条件太严」 */
+  const emptyWhenNone = groups.length ? undefined : <EmptyHint variant="target" />;
+
   return (
     <section className="panel">
       <div className="panel-head">
@@ -842,14 +943,18 @@ function TargetPanel() {
       </div>
       <div className="panel-body" id="targetList">
         {treeView === 'diff'
-          ? <DiffTable groups={list} terms={pq.terms} />
-          : <TargetTree groups={list} terms={pq.terms} done={done} />}
+          ? <DiffTable groups={list} terms={pq.terms} emptyWhenNone={emptyWhenNone} />
+          : <TargetTree groups={list} terms={pq.terms} done={done} emptyWhenNone={emptyWhenNone} />}
       </div>
     </section>
   );
 }
 
-function TargetTree({ groups, terms, done }: { groups: AnimeGroup[]; terms: string[]; done: Set<string> }) {
+function TargetTree({ groups, terms, done, emptyWhenNone }: {
+  groups: AnimeGroup[]; terms: string[]; done: Set<string>;
+  /** 一个分组都没有（不是被筛选掉）时展示的提示；调用方决定说什么 */
+  emptyWhenNone?: ReactNode;
+}) {
   const collapsed = useApp(s => s.collapsed);
   const toggleCollapsed = useApp(s => s.toggleCollapsed);
   const setCollapsed = useApp(s => s.setCollapsed);
@@ -899,7 +1004,7 @@ function TargetTree({ groups, terms, done }: { groups: AnimeGroup[]; terms: stri
   }, [groups, done]);
 
   if (!groups.length) {
-    return <div className="empty">没有匹配的归档目标<br />检索条件可能过于严格</div>;
+    return <>{emptyWhenNone ?? <div className="empty">没有匹配的归档目标<br />检索条件可能过于严格</div>}</>;
   }
 
   /**
@@ -1096,7 +1201,11 @@ function TargetRenameHost({ group, onClose }: { group: AnimeGroup; onClose: () =
   );
 }
 
-function DiffTable({ groups, terms }: { groups: AnimeGroup[]; terms: string[] }) {
+function DiffTable({ groups, terms, emptyWhenNone }: {
+  groups: AnimeGroup[]; terms: string[];
+  /** 一个分组都没有（不是被筛选掉）时展示的提示 */
+  emptyWhenNone?: ReactNode;
+}) {
   const plan = useApp(s => s.plan);
   const doneSet = useApp(s => s.doneSet);
   const sourceRoot = useApp(s => s.sourceRoot);
@@ -1106,7 +1215,7 @@ function DiffTable({ groups, terms }: { groups: AnimeGroup[]; terms: string[] })
   const planDirs = usePlanDirs([]);
   const done = useMemo(() => new Set(doneSet), [doneSet]);
 
-  if (!groups.length) return <div className="empty">没有匹配记录</div>;
+  if (!groups.length) return <>{emptyWhenNone ?? <div className="empty">没有匹配记录</div>}</>;
 
   const entryMap = new Map((plan?.entries ?? []).map(e => [`${e.groupId}|${e.name}|${e.isDir}`, e]));
   const srcRoot = sourceRoot.replace(/[\\/]+$/, '');

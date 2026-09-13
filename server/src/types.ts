@@ -378,6 +378,15 @@ export interface YearStat {
   totalSize: number;
 }
 
+/** 按「年 + 月」聚合的统计（图表「按月份」模式用；month = 0 表示只有年份、没有月份的兜底桶） */
+export interface MonthStat {
+  year: number;
+  month: number;
+  animeCount: number;
+  fileCount: number;
+  totalSize: number;
+}
+
 export interface LibraryStats {
   animeCount: number;
   fileCount: number;
@@ -385,6 +394,8 @@ export interface LibraryStats {
   revertableCount: number;
   specialCount: number;
   years: YearStat[];
+  /** 按月份聚合（年降序 → 月降序）；旧索引没有这个字段时前端会现算 */
+  months: MonthStat[];
 }
 
 export interface LibraryIndex {
@@ -443,6 +454,11 @@ export interface AppConfig {
   googleCx: string;
   /** 扫描/归一化的并发度（NAS 上单次操作是一个网络往返，并发才是提速关键） */
   scanConcurrency: number;
+  /**
+   * 关闭网页时自动关闭本地服务（默认开）。
+   * 有任务在运行时浏览器会先弹「确定要离开吗」二次确认；刷新页面不会误关（服务端有宽限期）。
+   */
+  shutdownOnPageClose: boolean;
 }
 
 /* ================= 通用 ================= */

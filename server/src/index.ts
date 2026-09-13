@@ -11,9 +11,16 @@ import * as path from 'node:path';
 import { createServer, VERSION } from './http/server';
 import { Store } from './core/store';
 import { ensureDir } from './fsx/fsx';
+import { createPageSessions } from './core/pageSessions';
+import { isExecuteRunning, requestExecuteStop } from './core/executor';
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const PROJECT_ROOT = path.resolve(SERVER_ROOT, '..');
+
+/** 关掉网页后自动退出时，最多等归档批次多久（等不到也会退出，进度已落盘可续跑） */
+const AUTO_EXIT_STOP_TIMEOUT_MS = 30000;
+
+const sleep = (ms: number): Promise<void> => new Promise(res => setTimeout(res, ms));
 
 async function findSiteDir(): Promise<string> {
   const dist = path.join(PROJECT_ROOT, 'web', 'dist');
@@ -70,12 +77,23 @@ async function main(): Promise<void> {
    */
   const publicDataDir = path.join(PROJECT_ROOT, 'web', 'public', 'data');
 
+  /*
+   * 网页会话：前端在页面加载时登记、关闭时注销；
+   * 关掉**最后一个**页面 → 宽限期（默认 2.5s，给「刷新页面」留时间）后自动关闭服务。
+   */
+  const pageSessions = createPageSessions({
+    enabled: () => store.getConfig().shutdownOnPageClose !== false,
+    onCloseService: () => { void autoExit(); },
+    log: msg => console.log(`  ${msg}`)
+  });
+
   const ctx = {
     store,
     siteDir,
     dataDir,
     indexDirs: [webDataDir, publicDataDir],
     startedAt: Date.now(),
+    pageSessions,
     onShutdown: (): void => {
       /* 由 /api/shutdown 调用；此处无需额外动作 */
     }
@@ -122,7 +140,7 @@ async function main(): Promise<void> {
   console.log(`   网站地址 : ${url}`);
   console.log(`   索引目录 : ${dataDir}`);
   console.log(`   进程 PID : ${process.pid}`);
-  console.log('   关闭方式 : 网页右上角「⏻ 关闭服务」，或运行 server\\bin\\stop.bat');
+  console.log('   关闭方式 : 关闭网页（自动）/ 网页右上角「⏻ 关闭服务」/ server\\bin\\stop.bat');
   console.log('');
 
   // 自动打开浏览器（可用 --no-open 关闭）
@@ -137,9 +155,42 @@ async function main(): Promise<void> {
     try { await fsp.rm(path.join(dataDir, 'runtime.json'), { force: true }); } catch { /* ignore */ }
     try { await fsp.rm(path.join(store.dataDir, 'runtime.json'), { force: true }); } catch { /* ignore */ }
   };
-  const bye = (): void => { void cleanup().finally(() => process.exit(0)); };
+  const bye = (): void => {
+    pageSessions.reset();
+    void cleanup().finally(() => process.exit(0));
+  };
   process.on('SIGINT', bye);
   process.on('SIGTERM', bye);
+
+  /*
+   * 关掉最后一个网页后的自动退出。
+   *
+   * 与 `/api/shutdown`（点「⏻ 关闭服务」）的区别：这里**先收尾再退出** ——
+   * 如果正在执行归档，先请求「停止」（不再取新条目、已在搬的那几个先跑完），
+   * 避免硬退在 NAS 上留下复制到一半的文件；然后落盘缓存/别名、删掉 runtime.json。
+   */
+  let exiting = false;
+  async function autoExit(): Promise<void> {
+    if (exiting) return;
+    exiting = true;
+    console.log('');
+    console.log('  ⏻ 网页已关闭 → 正在关闭本地服务（下次双击 server\\bin\\start.vbs 即可重新启动）…');
+
+    const stop = requestExecuteStop();
+    if (stop.stopped) {
+      console.log(`     归档批次 ${stop.batchId} 正在收尾：不再取新条目，已在搬的先跑完（避免 NAS 上留半截文件）…`);
+      const deadline = Date.now() + AUTO_EXIT_STOP_TIMEOUT_MS;
+      while (isExecuteRunning() && Date.now() < deadline) await sleep(250);
+      console.log(isExecuteRunning()
+        ? '     ⚠ 批次仍未结束，仍然退出：实时进度已写 execute-state.json，下次打开页面可点「▶ 继续归档」'
+        : '     ✔ 归档批次已安全收尾');
+    }
+
+    try { await store.flush(); } catch { /* ignore */ }
+    try { await cleanup(); } catch { /* ignore */ }
+    console.log('  ⏻ 本地服务已关闭');
+    process.exit(0);
+  }
 }
 
 main().catch(err => {

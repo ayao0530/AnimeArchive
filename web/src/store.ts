@@ -91,6 +91,8 @@ export interface AppState {
   libraryError: string | null;
   libQuery: string;
   chartMode: 'count' | 'size';
+  /** 统计粒度：按年份 / 按月份（媒体库「📊 统计与图表」） */
+  chartBucket: 'year' | 'month';
 
   /* ---------------- actions ---------------- */
   boot: () => Promise<void>;
@@ -176,6 +178,7 @@ export interface AppState {
   loadLibrary: () => Promise<void>;
   rebuildIndex: () => Promise<void>;  setLibQuery: (q: string) => void;
   setChartMode: (m: 'count' | 'size') => void;
+  setChartBucket: (b: 'year' | 'month') => void;
   play: (fullPath: string, name: string) => Promise<void>;
   revertFile: (fullPath: string, name: string) => Promise<void>;
   renameLibraryAnime: (relPath: string, newName: string) => Promise<void>;
@@ -277,6 +280,7 @@ export const useApp = create<AppState>((set, get) => ({
   libraryError: null,
   libQuery: '',
   chartMode: 'count',
+  chartBucket: 'year',
   selected: [],
 
   /* ================= 启动 ================= */
@@ -302,7 +306,11 @@ export const useApp = create<AppState>((set, get) => ({
           servicePort: cfg.port || probe.port
         });
         setApiPort(cfg.port || probe.port);
-        get().pushLog(`⏻ 本地服务已连接 · 127.0.0.1:${cfg.port || probe.port}`, 'ok');
+        get().pushLog(
+          `⏻ 本地服务已连接 · 127.0.0.1:${cfg.port || probe.port}` +
+          (cfg.shutdownOnPageClose === false ? '（关闭网页后服务继续运行）' : '（关闭网页即自动关闭服务，可在 ⚙ 设置里改）'),
+          'ok'
+        );
         await get().checkTargetRoot();
         // 直接载入「上次扫描结果」，避免每次打开都重新扫描
         await get().loadSnapshot();
@@ -937,6 +945,9 @@ export const useApp = create<AppState>((set, get) => ({
       }
       if (patch.reviewThreshold !== undefined) parts.push(`阈值 ${cfg.reviewThreshold}/${cfg.autoThreshold}`);
       if (patch.scanConcurrency !== undefined) parts.push(`扫描并发 ${cfg.scanConcurrency}`);
+      if (patch.shutdownOnPageClose !== undefined) {
+        parts.push(`关闭网页自动关服务${patch.shutdownOnPageClose ? '开' : '关'}`);
+      }
       get().pushLog(`⚙ 设置已更新：${parts.join('、') || '已保存'}（下次扫描生效）`, 'ok');
       get().showToast('⚙ 设置已保存（下次扫描生效）', '#27c08a');
     } catch (err) {
@@ -1112,6 +1123,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   setLibQuery: q => set({ libQuery: q }),
   setChartMode: m => set({ chartMode: m }),
+  setChartBucket: b => set({ chartBucket: b }),
 
   play: async (fullPath, name) => {
     if (!get().serviceOnline) { get().showToast('⚠️ 请先启动本地服务', '#f2b632'); return; }

@@ -44,6 +44,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [webSearch, setWebSearch] = useState(config?.webSearchEnabled !== false);
   const [useFileTime, setUseFileTime] = useState(config?.useFileTime !== false);
   const [bangumi, setBangumi] = useState(config?.bangumiEnabled !== false);
+  const [autoClose, setAutoClose] = useState(config?.shutdownOnPageClose !== false);
   const [gKey, setGKey] = useState(config?.googleApiKey ?? '');
   const [gCx, setGCx] = useState(config?.googleCx ?? '');
   const [review, setReview] = useState(String(config?.reviewThreshold ?? 0.7));
@@ -62,6 +63,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       webSearchEnabled: webSearch,
       useFileTime,
       bangumiEnabled: bangumi,
+      shutdownOnPageClose: autoClose,
       googleApiKey: gKey.trim(),
       googleCx: gCx.trim(),
       scanConcurrency: c,
@@ -108,6 +110,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         onChange={setBangumi}
         title="③ Bangumi 在线查询"
         desc="官方中文名与首播年月的权威来源。关闭后只使用本地别名表与网页检索结果。"
+      />
+      <Switch
+        on={autoClose}
+        onChange={setAutoClose}
+        title="④ 关闭网页时自动关闭服务"
+        desc="关掉**最后一个**网页后自动停止本地服务，不必再手动点「⏻ 关闭服务」。有任务在运行时浏览器会先弹「确定要离开吗」二次确认；刷新页面不会误关（服务端留 2.5 秒宽限期），多个标签页只关其中一个也不会关服务。"
       />
 
       <div className="kv">

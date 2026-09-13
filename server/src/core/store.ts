@@ -606,7 +606,9 @@ function defaultConfig(root: string): AppConfig {
     useFileTime: true,
     googleApiKey: '',
     googleCx: '',
-    scanConcurrency: 10
+    scanConcurrency: 10,
+    // 关掉最后一个网页 → 自动关闭本地服务（免去手动点「⏻ 关闭服务」）
+    shutdownOnPageClose: true
   };
 }
 
