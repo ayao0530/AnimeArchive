@@ -1,6 +1,6 @@
 <div align="center">
 
-# 番剧归档助手 · Anime Archive Helper
+# 番剧归档助手 · Anime Archive Helper - write by deepseek v4.1 Flash
 
 **把散落在网络盘里的番剧文件，自动整理成「年份 / 月份 / 官方中文名」的媒体库** ——
 归档器 + 离线媒体库二合一，面向 Windows 本地单机，后端**零运行时依赖**。
@@ -76,7 +76,7 @@
 **环境要求**：Windows 10/11 + **Node.js 18+**（归档源与目标可以是 NAS 网络盘、也可以是本地磁盘）。
 
 ```powershell
-git clone https://github.com/<你的账号>/<仓库名>.git
+git clone https://github.com/ayao0530/AnimeArchive.git
 cd <仓库名>
 
 # 1) 后端（编译 + 启动，默认监听 127.0.0.1:9999）
@@ -206,7 +206,3 @@ node dist/e2e.js      # 期望：通过 43 / 43
 - 媒体库索引是**快照**：直接在 NAS 上手工增删文件后，需要点一次「↻ 重建索引」。
 
 ---
-
-## 📄 License
-
-尚未指定。若你打算再分发，请先在仓库根目录添加 `LICENSE`（例如 MIT）。
