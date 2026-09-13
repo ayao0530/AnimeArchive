@@ -1,7 +1,7 @@
 /**
  * 前端通用工具：格式化、检索语法、匹配、高亮
  */
-import type { AnimeGroup, GroupStatus, LibraryAnime } from './types';
+import type { AnimeGroup, GroupStatus, LibraryAnime, MonthStat, YearStat } from './types';
 
 export const pad = (n: number | string | null | undefined): string => String(n ?? '').padStart(2, '0');
 
@@ -256,6 +256,183 @@ export function matchGroup(g: AnimeGroup, pq: ParsedQuery, filter: string, doneS
 
 export function allLibraryFiles(a: LibraryAnime) {
   return [...a.files, ...(a.subDirs ?? []).flatMap(s => s.files)];
+}
+
+/* =========================================================
+   统计口径（📊 统计与图表）
+   ---------------------------------------------------------
+   ⚠ 与 `server/src/core/airStats.ts` 是**同一套规则**，改一处必须改两处：
+     . 集数 = 顶层**视频**文件数 + 子目录数（每个子目录 1 集；SP / OP&ED 不算集）
+       —— 不能用文件总数：`[FLsnow][…][05][1080p]` 里有 3 个文件也只算 1 集
+     . 集数 ≤ 3 的番剧不纳入统计（零散/不完整归档）
+     . 集数 > 14 且在 1/4/7/10 月播出的，按季度重复计入（ceil(集数/14) 季，最多 4 季）；
+       起点不是季度月的一律按原样只进自己那个月
+   服务端索引（`stats.airMonths` / `stats.airYears`）是新口径时直接用；
+   旧索引没有这些字段时，下面这套本地实现要算出**完全相同**的结果。
+   ========================================================= */
+
+/** 集数 ≤ 3 的番剧不纳入统计 */
+export const MIN_EPISODES = 4;
+/** 集数 > 14 才做跨季度分摊 */
+export const SPREAD_THRESHOLD = 14;
+/** 一季按 14 集算（12~13 集的一季番不跨季，15 集起跨 2 季） */
+export const EPISODES_PER_COUR = 14;
+/** 只有这些月份（季度起点）播出的番剧才做跨季分摊 */
+const QUARTER_MONTHS = [1, 4, 7, 10];
+/** 这些子目录不算「集」（SP / OP&ED 是特典，不是正片） */
+const NON_EPISODE_SUB_DIRS = ['sp', 'op&ed'];
+
+/** 集数：顶层视频文件数 + 子目录数（每个子目录算 1 集，SP / OP&ED 不计） */
+export function animeEpisodes(a: LibraryAnime): number {
+  // ⚠ 索引里的 episodes 缺失或 ≤0 时现算 —— 别把「未计算」当成「0 集」（否则整部番剧会被当成 ≤3 集排除）
+  const cached = a.episodes;
+  if (typeof cached === 'number' && cached > 0) return cached;
+  const topVideos = (a.files ?? []).filter(f => f.type === 'video').length;
+  const epDirs = (a.subDirs ?? []).filter(
+    s => !NON_EPISODE_SUB_DIRS.includes((s.dir ?? '').trim().toLowerCase())
+  ).length;
+  return topVideos + epDirs;
+}
+
+/** 该番剧要计入哪些「年-月」桶 */
+export function attributedMonthsOf(a: LibraryAnime, episodes: number): Array<{ year: number; month: number }> {
+  const base = { year: a.year as number, month: a.month ?? 0 };
+  if (episodes <= SPREAD_THRESHOLD) return [base];
+  if (!QUARTER_MONTHS.includes(base.month)) return [base];
+
+  const cours = Math.min(4, Math.max(2, Math.ceil(episodes / EPISODES_PER_COUR)));
+  const out: Array<{ year: number; month: number }> = [];
+  let year = base.year;
+  let month = base.month;
+  for (let i = 0; i < cours; i++) {
+    out.push({ year, month });
+    month += 3;
+    if (month > 12) { month -= 12; year += 1; }
+  }
+  return out;
+}
+
+export interface AirStats {
+  /** 播出月份桶（年降序 → 月降序） */
+  months: MonthStat[];
+  /** 播出年份桶（同一年内同一部番剧只计一次） */
+  years: YearStat[];
+  /** 被口径排除的番剧数（集数 ≤3） */
+  excludedShort: number;
+  /** 做了跨季分摊的番剧数 */
+  spreadCount: number;
+}
+
+/** 本地按新口径重算（旧索引兜底用；数值与 server/src/core/airStats.ts 完全一致） */export function computeAirStatsLocal(anime: LibraryAnime[]): AirStats {
+  const byMonth = new Map<string, MonthStat>();
+  const byYear = new Map<number, YearStat>();
+  let excludedShort = 0;
+  let spreadCount = 0;
+
+  anime.filter(a => !a.special && a.year !== null).forEach(a => {
+    const episodes = animeEpisodes(a);
+    if (episodes < MIN_EPISODES) { excludedShort += 1; return; }
+
+    const months = attributedMonthsOf(a, episodes);
+    if (months.length > 1) spreadCount += 1;
+
+    const fs = allLibraryFiles(a);
+    const fileCount = fs.length;
+    const totalSize = fs.reduce((x, f) => x + f.size, 0);
+
+    months.forEach(({ year, month }) => {
+      const key = `${year}-${month}`;
+      const cur = byMonth.get(key)
+        ?? { year, month, animeCount: 0, fileCount: 0, totalSize: 0, episodeCount: 0 };
+      cur.animeCount += 1;
+      cur.fileCount += fileCount;
+      cur.totalSize += totalSize;
+      cur.episodeCount = (cur.episodeCount ?? 0) + episodes;
+      byMonth.set(key, cur);
+    });
+
+    new Set(months.map(m => m.year)).forEach(year => {
+      const cur = byYear.get(year)
+        ?? { year, animeCount: 0, fileCount: 0, totalSize: 0, episodeCount: 0 };
+      cur.animeCount += 1;
+      cur.fileCount += fileCount;
+      cur.totalSize += totalSize;
+      cur.episodeCount = (cur.episodeCount ?? 0) + episodes;
+      byYear.set(year, cur);
+    });
+  });
+
+  return {
+    months: Array.from(byMonth.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month)),
+    years: Array.from(byYear.values()).sort((a, b) => b.year - a.year),
+    excludedShort,
+    spreadCount
+  };
+}
+
+/** 桶里的一部番剧（用于「展开看番剧名单」） */
+export interface BucketAnime {
+  /** 索引里的条目 id（点击名单时靠它定位到左侧卡片） */
+  id: string;
+  /** 官方中文名（= 归档文件夹名） */
+  name: string;
+  /** 集数（本工具口径，不是文件数） */
+  episodes: number;
+  /** 归档年份 */
+  year: number;
+  /** 归档月份（null = 只能到年） */
+  month: number | null;
+  /** 是否跨季重复计入（4 月首播的半年番，它在 7 月那一桶就是跨季来的） */
+  spread: boolean;
+}
+
+export interface AirAnimeIndex {
+  /** `${year}-${month}` → 该月播出的番剧 */
+  byMonth: Map<string, BucketAnime[]>;
+  /** 年份 → 该年播出的番剧（同一年内同一部只计一次） */
+  byYear: Map<number, BucketAnime[]>;
+}
+
+/**
+ * 把番剧按**同一套口径**分到各桶（供「年份/月份明细」展开看番剧名单）。
+ * 与 `computeAirStatsLocal` / 服务端 `computeAirStats` 用的是同一组判定，
+ * 所以名单里的条数与桶上的「N 部」必然一致。
+ */
+export function groupAirAnime(anime: LibraryAnime[]): AirAnimeIndex {
+  const byMonth = new Map<string, BucketAnime[]>();
+  const byYear = new Map<number, BucketAnime[]>();
+
+  anime.filter(a => !a.special && a.year !== null).forEach(a => {
+    const episodes = animeEpisodes(a);
+    if (episodes < MIN_EPISODES) return;
+    const months = attributedMonthsOf(a, episodes);
+    const item: BucketAnime = {
+      id: a.id,
+      name: a.zhName,
+      episodes,
+      year: a.year as number,
+      month: a.month,
+      spread: months.length > 1
+    };
+    months.forEach(({ year, month }) => {
+      const key = `${year}-${month}`;
+      const arr = byMonth.get(key) ?? [];
+      arr.push(item);
+      byMonth.set(key, arr);
+    });
+    new Set(months.map(m => m.year)).forEach(year => {
+      const arr = byYear.get(year) ?? [];
+      arr.push(item);
+      byYear.set(year, arr);
+    });
+  });
+
+  const sortLists = <K,>(m: Map<K, BucketAnime[]>): void => {
+    m.forEach(list => list.sort((x, y) => naturalCompare(x.name, y.name)));
+  };
+  sortLists(byMonth);
+  sortLists(byYear);
+  return { byMonth, byYear };
 }
 
 export function libraryHaystack(a: LibraryAnime): string {

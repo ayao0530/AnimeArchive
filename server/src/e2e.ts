@@ -19,6 +19,7 @@ import { timeAdjust } from './util/timesignal';
 import { buildBangumiQueries, clearNormalizeCache, normalizeName } from './core/normalizer';
 import { compareByEpisode } from './core/parser';
 import { createPageSessions } from './core/pageSessions';
+import { animeEpisodes, attributedMonths } from './core/airStats';
 import { aliasKey, similarity, similarityKeyed, strictKey, toSimplified } from './util/text';
 import type { LibraryAnime, LibraryFile } from './types';
 
@@ -819,61 +820,105 @@ async function main(): Promise<void> {
       `真关闭触发=${afterLast}（重复触发=${!notTwice}）；开关关闭时触发=${closedOff}`);
   }
 
-  /* ---------- A41 统计：「按年份」之外还要能「按月份」 ---------- */
-  // 归档目录本身就是 年\月 两级，月度统计能看出「当季追番」的分布。
-  // 锁：分桶正确、年降序+月降序、子目录里的文件也计入、特殊目录不计入、两种粒度合计一致。
-  const mkFile = (name: string, size: number, rev = false): LibraryFile => ({
-    uid: `uid-${name}`, name, fullPath: `X:\\lib\\${name}`, size, type: 'video',
+  /* ---------- A41 统计「播出月份」口径：集数 ≤3 不纳入 + >14 集跨季重复计入 ---------- */
+  // 口径实现在 core/airStats.ts（用户 2026-09-13 定的三条规则），前端 utils.computeAirStatsLocal 是同一套。
+  const mkFile = (name: string, size: number, rev = false, type: 'video' | 'other' = 'video'): LibraryFile => ({
+    uid: `uid-${name}`, name, fullPath: `X:\\lib\\${name}`, size, type,
     episode: null, originPath: rev ? `X:\\src\\${name}` : null, revertable: rev, mtime: ''
   });
+  /** n 个视频文件（每个 size 大小） */
+  const vids = (prefix: string, n: number, size = 10): LibraryFile[] =>
+    Array.from({ length: n }, (_, i) => mkFile(`${prefix}-${String(i + 1).padStart(2, '0')}.mp4`, size));
   const mkAnime = (
     id: string,
     year: number | null,
     month: number | null,
     files: LibraryFile[],
-    opts: { special?: boolean; spFiles?: LibraryFile[] } = {}
-  ): LibraryAnime => ({
-    id, zhName: id, aliases: [], year, month, bangumiId: null, cover: '',
-    relPath: `${year}\\${month}\\${id}`,
-    totalSize: files.reduce((a, f) => a + f.size, 0),
-    fileCount: files.length,
-    files,
-    subDirs: (opts.spFiles ?? []).length
-      ? [{
-        dir: 'SP', files: opts.spFiles!, fullPath: `X:\\lib\\${id}\\SP`,
-        originPath: null, revertable: false,
-        totalSize: opts.spFiles!.reduce((a, f) => a + f.size, 0)
-      }]
-      : [],
-    special: opts.special === true
-  });
+    opts: { special?: boolean; subDirs?: Array<{ dir: string; files: LibraryFile[] }> } = {}
+  ): LibraryAnime => {
+    const subDirs = (opts.subDirs ?? []).map(s => ({
+      dir: s.dir,
+      files: s.files,
+      fullPath: `X:\\lib\\${id}\\${s.dir}`,
+      originPath: null,
+      revertable: false,
+      totalSize: s.files.reduce((a, f) => a + f.size, 0)
+    }));
+    const all = [...files, ...subDirs.flatMap(s => s.files)];
+    return {
+      id, zhName: id, aliases: [], year, month, bangumiId: null, cover: '',
+      relPath: `${year}\\${month}\\${id}`,
+      totalSize: all.reduce((a, f) => a + f.size, 0),
+      fileCount: all.length,
+      episodes: 0,
+      files,
+      subDirs,
+      special: opts.special === true
+    };
+  };
 
   const statAnime: LibraryAnime[] = [
-    mkAnime('A', 2024, 1, [mkFile('a-01.mp4', 100, true), mkFile('a-02.mp4', 200)]),
-    mkAnime('B', 2024, 1, [mkFile('b-01.mp4', 50)]),
-    mkAnime('C', 2024, 7, [mkFile('c-01.mp4', 10), mkFile('c-02.mp4', 10), mkFile('c-03.mp4', 10)]),
-    mkAnime('D', 2023, 10, [mkFile('d-01.mp4', 7)], { spFiles: [mkFile('d-sp.mp4', 12)] }),
-    mkAnime('F', 2025, null, [mkFile('f-01.mp4', 5)]),
-    mkAnime('E', 2024, 7, [mkFile('e-01.mp4', 999)], { special: true })
+    // ① 只有 2 集 → 不纳入统计
+    mkAnime('short', 2024, 1, vids('s', 2, 100)),
+    // ② 13 集（12 个顶层视频 + 1 个「多文件发布目录」，里面 3 个文件只算 1 集）+ 1 个非视频文件
+    mkAnime('normal', 2024, 1, [...vids('n', 12), mkFile('n.nfo', 1, false, 'other')], {
+      subDirs: [{ dir: '[FLsnow][Star-Detective_Precure][13][1080p]', files: vids('nf', 3, 5) }]
+    }),
+    // ③ 16 集、4 月首播 → 计入 2024-04 与 2024-07
+    mkAnime('spread16', 2024, 4, vids('a', 16, 20)),
+    // ④ 36 集、10 月首播 → ceil(36/14)=3 季 → 2024-10 / 2025-01 / 2025-04（跨年）
+    mkAnime('spread36', 2024, 10, vids('b', 36, 30)),
+    // ⑤ 33 集但 2 月首播（非季度月）→ 只计入 2026-02
+    mkAnime('nonQuarter', 2026, 2, vids('c', 33, 40)),
+    // ⑥ 4 集 + SP 子目录（SP 不算集数，但文件/体积仍计入）
+    mkAnime('spOnly', 2025, 7, vids('d', 4, 50), { subDirs: [{ dir: 'SP', files: vids('ds', 2, 60) }] }),
+    // ⑦ 特殊目录（_未识别）→ 两组统计都不参与
+    mkAnime('specialDir', null, null, vids('e', 5, 999), { special: true })
   ];
+
   const st = computeStats(statAnime);
-  const mKey = st.months.map(m => `${m.year}-${m.month}`).join(',');
-  const m = (y: number, mm: number) => st.months.find(x => x.year === y && x.month === mm);
-  const sumMonths = (pick: (x: typeof st.months[number]) => number): number =>
-    st.months.reduce((a, x) => a + pick(x), 0);
-  check('A41', '统计按月聚合：分桶正确 + 年/月降序 + 子目录计入 + 特殊目录排除 + 两种粒度合计一致',
-    mKey === '2025-0,2024-7,2024-1,2023-10' &&
-    m(2024, 1)?.animeCount === 2 && m(2024, 1)?.fileCount === 3 && m(2024, 1)?.totalSize === 350 &&
-    m(2024, 7)?.animeCount === 1 && m(2024, 7)?.totalSize === 30 &&
-    m(2023, 10)?.fileCount === 2 && m(2023, 10)?.totalSize === 19 &&
-    st.specialCount === 1 && st.animeCount === 5 && st.fileCount === 9 && st.totalSize === 404 &&
-    st.revertableCount === 1 &&
-    sumMonths(x => x.animeCount) === st.animeCount &&
-    sumMonths(x => x.fileCount) === st.fileCount &&
-    sumMonths(x => x.totalSize) === st.totalSize,
-    `月份桶=${mKey}；2024-01=${JSON.stringify(m(2024, 1))}；2023-10=${JSON.stringify(m(2023, 10))}；` +
-    `合计 部=${sumMonths(x => x.animeCount)}/${st.animeCount}、文件=${sumMonths(x => x.fileCount)}/${st.fileCount}、` +
-    `体积=${sumMonths(x => x.totalSize)}/${st.totalSize}`);
+  const mKey = st.airMonths.map(x => `${x.year}-${x.month}`).join(',');
+  const yKey = st.airYears.map(y => `${y.year}:${y.animeCount}`).join(',');
+  const m = (y: number, mm: number) => st.airMonths.find(x => x.year === y && x.month === mm);
+  const sumM = (pick: (x: typeof st.airMonths[number]) => number): number =>
+    st.airMonths.reduce((a, x) => a + pick(x), 0);
+  check('A41', '播出月份口径：集数 ≤3 不纳入 / >14 集且在 1/4/7/10 月播出的按季度重复计入（含跨年）/ 年份桶同年去重',
+    mKey === '2026-2,2025-7,2025-4,2025-1,2024-10,2024-7,2024-4,2024-1' &&
+    yKey === '2026:1,2025:2,2024:3' &&
+    m(2024, 1)?.animeCount === 1 && m(2024, 1)?.episodeCount === 13 &&      // normal（13 集）
+    m(2024, 4)?.animeCount === 1 && m(2024, 7)?.animeCount === 1 &&          // spread16 两季都在
+    m(2025, 1)?.animeCount === 1 && m(2025, 4)?.animeCount === 1 &&          // spread36 跨年
+    m(2026, 2)?.animeCount === 1 && m(2026, 2)?.episodeCount === 33 &&       // 非季度月不跨季
+    m(2025, 7)?.episodeCount === 4 &&                                        // SP 不算集数
+    st.excludedShort === 1 && st.spreadCount === 2 &&
+    sumM(x => x.animeCount) === 8 &&                                         // 5 部 + 跨季多出的 3 次
+    (st.airYears.reduce((a, y) => a + y.animeCount, 0)) === 6 &&             // 跨年那部在两年各计一次
+    // 真值（文件夹口径）不受统计口径影响：2024 仍是 4 部（含 2 集的 short），且特殊目录不计
+    st.years.find(y => y.year === 2024)?.animeCount === 4 &&
+    st.animeCount === 6 && st.specialCount === 1,
+    `月份桶=${mKey}；年份桶=${yKey}；2024-01=${JSON.stringify(m(2024, 1))}；2025-07=${JSON.stringify(m(2025, 7))}；` +
+    `排除(≤3集)=${st.excludedShort}；跨季=${st.spreadCount}；月份部数合计=${sumM(x => x.animeCount)}；` +
+    `真值 2024=${st.years.find(y => y.year === 2024)?.animeCount} 部`);
+
+  /* ---------- A42 集数算法：子目录=1 集、SP/OP&ED 不算、非视频不算 ---------- */
+  const epCase = (files: LibraryFile[], subDirs: Array<{ dir: string; files: LibraryFile[] }>) =>
+    animeEpisodes(mkAnime('t', 2024, 1, files, { subDirs }));
+  const epFlat = epCase(vids('x', 12), []);                                        // 12
+  const epMultifile = epCase(vids('x', 12), [{ dir: '[FLsnow][…][13][1080p]', files: vids('y', 3) }]);  // 13（不是 15）
+  const epSp = epCase(vids('x', 12), [
+    { dir: 'SP', files: vids('s', 2) },
+    { dir: 'OP&ED', files: vids('o', 2) }
+  ]);                                                                             // 12（SP/OP&ED 不算）
+  const epOther = epCase([...vids('x', 12), mkFile('a.nfo', 1, false, 'other')], []);  // 12（非视频不算）
+  const epNested = epCase(vids('x', 3), [{ dir: 'Season 2', files: vids('z', 24) }]); // 4（子目录只算 1 集）
+  check('A42', '集数 = 顶层视频文件数 + 子目录数（每个子目录 1 集）：多文件发布目录不再被算成多集，SP/OP&ED 与非视频不计',
+    epFlat === 12 && epMultifile === 13 && epSp === 12 && epOther === 12 && epNested === 4 &&
+    // 跨季分摊本身：16 集 4 月首播 → 04/07；13 集不跨季；2 月首播不跨季；54 集封顶 4 季
+    attributedMonths(mkAnime('t1', 2024, 4, []), 16).map(x => `${x.year}-${x.month}`).join(',') === '2024-4,2024-7' &&
+    attributedMonths(mkAnime('t2', 2024, 4, []), 14).map(x => `${x.year}-${x.month}`).join(',') === '2024-4' &&
+    attributedMonths(mkAnime('t3', 2026, 2, []), 33).map(x => `${x.year}-${x.month}`).join(',') === '2026-2' &&
+    attributedMonths(mkAnime('t4', 2024, 10, []), 54).map(x => `${x.year}-${x.month}`).join(',') === '2024-10,2025-1,2025-4,2025-7',
+    `12 集=${epFlat}；12+多文件目录=${epMultifile}；12+SP&OPED=${epSp}；12+非视频=${epOther}；3+整季目录=${epNested}`);
 
   /* ---------- 汇总 ---------- */
   const failed = results.filter(r => !r.pass);

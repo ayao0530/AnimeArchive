@@ -109,8 +109,14 @@ export interface AppState {
   setFilter: (f: ArchiveFilter) => void;
   setTreeView: (v: 'tree' | 'diff') => void;
   toggleCollapsed: (key: string) => void;
+  /** 统计面板点名的那部番剧：左侧列表据此折叠其他年份/月份、定位并高亮（nonce 保证重复点击也生效） */
+  focusAnime: { id: string; nonce: number } | null;
+  requestFocusAnime: (id: string) => void;
+
   /** 显式设置折叠状态（月份有「默认折叠」策略，切换时必须用这个而不是 toggle） */
   setCollapsed: (key: string, collapsed: boolean) => void;
+  /** 一次写入多个折叠状态（点「番剧名单」里的名字时要「折叠其他、只展开目标那一条链路」） */
+  setCollapsedMany: (patch: Record<string, boolean>) => void;
   toggleExpanded: (groupId: string) => void;
   setLinked: (groupId: string | null) => void;
 
@@ -281,6 +287,7 @@ export const useApp = create<AppState>((set, get) => ({
   libQuery: '',
   chartMode: 'count',
   chartBucket: 'year',
+  focusAnime: null,
   selected: [],
 
   /* ================= 启动 ================= */
@@ -405,6 +412,8 @@ export const useApp = create<AppState>((set, get) => ({
   setTreeView: v => set({ treeView: v }),
   toggleCollapsed: key => set({ collapsed: { ...get().collapsed, [key]: !get().collapsed[key] } }),
   setCollapsed: (key, value) => set({ collapsed: { ...get().collapsed, [key]: value } }),
+  setCollapsedMany: patch => set({ collapsed: { ...get().collapsed, ...patch } }),
+  requestFocusAnime: id => set({ focusAnime: { id, nonce: Date.now() } }),
   toggleExpanded: id => set({ expanded: { ...get().expanded, [id]: get().expanded[id] === false } }),
   setLinked: id => set({ linkedGroupId: id }),
 

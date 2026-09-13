@@ -2,10 +2,11 @@ import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as React
 import { createPortal } from 'react-dom';
 import { useApp } from '../store';
 import { api } from '../api/client';
-import type { LibraryAnime, LibraryFile, LibrarySubDir, MonthStat } from '../types';
+import type { LibraryAnime, LibraryFile, LibrarySubDir, MonthStat, YearStat } from '../types';
 import {
-  allLibraryFiles, compareByEpisode, formatDateTime, formatSize, formatTime, highlight,
-  isTextSelecting, joinWinPath, matchAnime, pad, padEpisode, parseQuery
+  allLibraryFiles, animeEpisodes, compareByEpisode, computeAirStatsLocal, formatDateTime, formatSize,
+  formatTime, groupAirAnime, highlight, isTextSelecting, joinWinPath, matchAnime, pad, padEpisode, parseQuery,
+  type BucketAnime
 } from '../utils';
 import { RenameDialog } from '../components/Dialogs';
 import { EntryMoveHost, type MoveEntry } from '../components/EntryMove';
@@ -218,6 +219,24 @@ function LibListPanel() {
     });
     return Array.from(years.entries()).sort((a, b) => b[0] - a[0]);
   }, [normals]);
+
+  /**
+   * 统计面板点名单里的番剧名 → 这里滚动到那张卡片并高亮。
+   *
+   * 折叠/展开已经在统计面板那边做完了（`setCollapsedMany`），所以这里只管 DOM：
+   * 等这次渲染落地后查 `[data-anime-id]`，滚到视口中间并闪一下边框。
+   * ⚠ 这是「跳转」类操作，用 `behavior:'auto'`（瞬时），平滑滚动在几千行的树上要等很久。
+   */
+  const focusTarget = useApp(s => s.focusAnime);
+  useEffect(() => {
+    if (!focusTarget) return;
+    const el = document.querySelector(`.lib-anime[data-anime-id="${CSS.escape(focusTarget.id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'auto' });
+    el.classList.add('hit');
+    const timer = window.setTimeout(() => el.classList.remove('hit'), 2200);
+    return () => { window.clearTimeout(timer); el.classList.remove('hit'); };
+  }, [focusTarget]);
 
   return (
     <section className="panel">
@@ -490,7 +509,7 @@ function AnimeCard({
   const selfCollapsed = collapse.isCollapsed(selfKey, true);
 
   return (
-    <div className={`lib-anime${anime.special ? ' special' : ''}`}>
+    <div className={`lib-anime${anime.special ? ' special' : ''}`} data-anime-id={anime.id}>
       <div
         className={`arow${selfCollapsed ? ' collapsed' : ''}`}
         onClick={() => collapse.toggle(selfKey, selfCollapsed)}
@@ -511,7 +530,11 @@ function AnimeCard({
             {anime.bangumiId ? ` · bgm${anime.bangumiId}` : ''}
           </div>
         </div>
-        <span className="pill">{files.length} 集</span>
+        {/* ⚠ 这里显示的是**集数**（= 顶层视频文件数 + 子目录数，SP/OP&ED 不算），
+            不是文件数：`[FLsnow][…][05][1080p]` 这种多文件发布目录只算 1 集 */}
+        <span className="pill" title={`${files.length} 个文件（集数另算，子目录按 1 集计）`}>
+          {animeEpisodes(anime)} 集
+        </span>
         <span className="pill src">{formatSize(size)}</span>
         {/* 勾选后**就地把入口放在这儿**：用户容易在卡片头找「只移动勾选的那几个」 */}
         {selCount > 0 && (
@@ -772,6 +795,7 @@ interface StatsRow {
   animeCount: number;
   fileCount: number;
   totalSize: number;
+  episodeCount: number;
   /** 0 = 年份（或按月份模式的平铺行），1 = 年份下面展开出来的月份行 */
   depth: 0 | 1;
   /** 该年实际有归档记录的月份数（>0 才可展开） */
@@ -788,36 +812,78 @@ function LibStatsPanel() {
   const library = useApp(s => s.library);
   const chartMode = useApp(s => s.chartMode);
   const chartBucket = useApp(s => s.chartBucket);
+  const setCollapsedMany = useApp(s => s.setCollapsedMany);
+  const requestFocusAnime = useApp(s => s.requestFocusAnime);
+  const setLibQuery = useApp(s => s.setLibQuery);
+  const libQuery = useApp(s => s.libQuery);
   /** 展开的年份；null = 用户还没手动点过 → 默认展开最新的一年 */
   const [openYears, setOpenYears] = useState<number[] | null>(null);
+  /** 「年份/月份明细」里展开番剧名单的行（**默认全部折叠**） */
+  const [openNames, setOpenNames] = useState<string[]>([]);
 
   const stats = library?.stats;
-  const yearList = stats?.years;
 
   /*
-   * 按月聚合：新索引直接带 stats.months；
-   * 旧索引（还没点「↻ 重建索引」）现场按 anime 算一遍 —— 否则月份行会显示不出来，
-   * 用户会以为功能没做。两边的过滤/求和口径必须与服务端 computeStats 完全一致：
-   * 排除特殊目录、year 为 null 的不统计、体积含子目录里的文件。
+   * 图表数据 = **播出月份口径**（口径说明见 utils.computeAirStatsLocal）：
+   *  · 集数 = 顶层视频文件数 + 子目录数（每个子目录 1 集，SP/OP&ED 不算）
+   *  · 集数 ≤3 的番剧不纳入统计
+   *  · 集数 >14 且在 1/4/7/10 月播出的，按季度重复计入（4 月首播的 16 集番 ⇒ 4 月与 7 月都有）
+   *
+   * 新索引直接带 stats.airMonths / stats.airYears；
+   * 旧索引（还没点「↻ 重建索引」）没有这组字段 → 前端现场按同一套口径算一遍，
+   * 否则图表会直接变空，用户会以为功能没做。
    */
-  const months = useMemo(() => {
-    if (!library) return [];
-    if (library.stats.months?.length) return library.stats.months;
-    const map = new Map<string, MonthStat>();
-    library.anime.forEach(a => {
-      const year = a.year;
-      if (a.special || year === null) return;
-      const month = a.month ?? 0;
-      const fs = allLibraryFiles(a);
-      const cur = map.get(`${year}-${month}`)
-        ?? { year, month, animeCount: 0, fileCount: 0, totalSize: 0 };
-      cur.animeCount += 1;
-      cur.fileCount += fs.length;
-      cur.totalSize += fs.reduce((x, f) => x + f.size, 0);
-      map.set(`${year}-${month}`, cur);
-    });
-    return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month));
+  const airStats = useMemo(() => {
+    if (!library) return null;
+    const fromIndex = Array.isArray(library.stats.airMonths) && Array.isArray(library.stats.airYears);
+    const s = fromIndex
+      ? {
+        months: library.stats.airMonths as MonthStat[],
+        years: library.stats.airYears as YearStat[],
+        excludedShort: library.stats.excludedShort ?? 0,
+        spreadCount: library.stats.spreadCount ?? 0
+      }
+      : computeAirStatsLocal(library.anime);
+    return { ...s, fromIndex };
   }, [library]);
+
+  const months = airStats?.months ?? [];
+  const airYears = airStats?.years ?? [];
+
+  /** 各桶里的番剧名单（同一套口径，条数与「N 部」一致） */
+  const airNames = useMemo(() => groupAirAnime(library?.anime ?? []), [library]);
+  const namesOf = (r: StatsRow): BucketAnime[] => (r.depth === 1
+    ? (airNames.byMonth.get(r.key) ?? [])
+    : (airNames.byYear.get(Number(r.key)) ?? []));
+  const toggleNames = (key: string): void =>
+    setOpenNames(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
+
+  /**
+   * 点名单里的番剧 → 让**左侧媒体库**定位到它的文件夹：
+   *  ① 先清掉检索词 —— 检索期间树是强制全展开的，不清就无法「只展开目标」；
+   *  ② 把**所有**年份/月份都设为折叠，只把目标所在的那一条链路展开（= 用户要的「折叠其他已展开的」）；
+   *  ③ 发 `requestFocusAnime(id)`，由左侧列表滚动到该卡片并高亮。
+   */
+  const focusAnimeRow = (x: BucketAnime): void => {
+    if (library && libQuery) setLibQuery('');
+    const patch: Record<string, boolean> = {};
+    const years = new Set<number>();
+    const monthKeys = new Set<string>();
+    (library?.anime ?? []).forEach(a => {
+      if (a.special || a.year === null) return;
+      years.add(a.year);
+      monthKeys.add(`${a.year}-${a.month ?? 0}`);
+    });
+    years.forEach(y => { patch[`lib-y${y}`] = true; });
+    monthKeys.forEach(k => {
+      const [y, m] = k.split('-');
+      patch[`lib-y${y}-m${m}`] = true;
+    });
+    patch[`lib-y${x.year}`] = false;
+    patch[`lib-y${x.year}-m${x.month ?? 0}`] = false;
+    setCollapsedMany(patch);
+    requestFocusAnime(x.id);
+  };
 
   /** 年份 → 该年实际存在的月份（只列真实存在的月份，不留空的 12 个月） */
   const monthsByYear = useMemo(() => {
@@ -833,8 +899,8 @@ function LibStatsPanel() {
   // 默认展开最新的一年：一进页面就能看到「年 + 月」两层，点一下即可收起
   const expandedYears = useMemo(() => {
     if (openYears) return openYears;
-    return yearList?.length ? [yearList[0].year] : [];
-  }, [openYears, yearList]);
+    return airYears.length ? [airYears[0].year] : [];
+  }, [openYears, airYears]);
 
   if (!library || !stats) {
     return (
@@ -857,17 +923,19 @@ function LibStatsPanel() {
     animeCount: m.animeCount,
     fileCount: m.fileCount,
     totalSize: m.totalSize,
+    episodeCount: m.episodeCount ?? 0,
     depth: 1,
     year: m.year
   });
 
   /** 年份模式：年份行 + （展开时）该年的月份行；月份模式：所有月份平铺 */
-  const yearRows: StatsRow[] = (yearList ?? []).map(y => ({
+  const yearRows: StatsRow[] = airYears.map(y => ({
     key: String(y.year),
     label: String(y.year),
     animeCount: y.animeCount,
     fileCount: y.fileCount,
     totalSize: y.totalSize,
+    episodeCount: y.episodeCount ?? 0,
     depth: 0,
     childCount: (monthsByYear.get(y.year) ?? []).length,
     year: y.year
@@ -897,20 +965,38 @@ function LibStatsPanel() {
     ? '· 按归档目录的「年\\月」层级统计'
     : '· 点年份整行即可展开该年的月份（只列真实存在的月份）';
 
+  /**
+   * 统计口径说明（用户 2026-09-13 定的规则，实现在 utils.computeAirStatsLocal）：
+   *  · 集数 ≤3 的不纳入（零散/不完整归档）
+   *  · 集数 >14 且在 1/4/7/10 月播出的按季度重复计入（半年番在下一季仍在播）
+   */
+  const scopeHint = [
+    '口径：单部 ≥4 集',
+    airStats && airStats.spreadCount > 0 ? `${airStats.spreadCount} 部跨季重复计入` : '',
+    airStats && airStats.excludedShort > 0 ? `已排除 ${airStats.excludedShort} 部（≤3 集）` : '',
+    airStats && !airStats.fromIndex ? '（旧索引现算，重建索引后一致）' : ''
+  ].filter(Boolean).join(' · ');
+
   /** 该行可展开的年份（null = 不可展开：月份行、平铺模式的月份行、没有归档月份的年份） */
   const expandableYear = (r: StatsRow): number | null =>
     (!isMonth && r.depth === 0 && r.childCount && r.year !== undefined ? r.year : null);
 
+  /** 月份行（仅「按年份」模式下、年份下面展开出来的子行）：点整行 → 该月的番剧名单 */
+  const isMonthChild = (r: StatsRow): boolean => !isMonth && r.depth === 1;
+
   /**
    * 展开箭头：**只做展示**。
    *
-   * 事件挂在整行上（用户要求「点年份整一条都能展开」），箭头再单独绑一次就会连点两下 = 看起来没反应。
+   * 事件挂在整行上（用户要求「点整一条都能展开」），箭头再单独绑一次就会连点两下 = 看起来没反应。
    * 不可展开的行也要渲染占位，否则各列对不齐。
+   *
+   * `withNames` = 当前这个块里的月份行是否可展开番剧名单（只有「明细」块是）。
    */
-  const caretOf = (r: StatsRow) => {
+  const caretOf = (r: StatsRow, withNames = false) => {
     const y = expandableYear(r);
-    if (y === null) return <span className="ycaret" aria-hidden="true" />;
-    const open = expandedYears.includes(y);
+    const monthRow = withNames && isMonthChild(r);
+    if (y === null && !monthRow) return <span className="ycaret" aria-hidden="true" />;
+    const open = y !== null ? expandedYears.includes(y) : openNames.includes(r.key);
     return (
       <span className={'ycaret clickable' + (open ? ' open' : '')} aria-hidden="true">
         {open ? '▾' : '▸'}
@@ -939,9 +1025,31 @@ function LibStatsPanel() {
 
   const labelCls = (r: StatsRow): string => 'y' + (isMonth || r.depth === 1 ? ' wide' : '');
 
-  /** 行的类名：可展开的年份行加 `expandable`（悬停高亮 + 手型光标） */
-  const rowCls = (r: StatsRow): string =>
-    'bar-row' + (r.depth === 1 ? ' child' : '') + (expandableYear(r) === null ? '' : ' expandable');
+  /**
+   * 月份行：点**整行**展开该月的番剧名单。
+   *
+   * ⚠ 年份行**不做**这件事（用户 2026-09-13 要求）：年份行已经是「点整行展开月份」，
+   * 再叠一层就冲突了；月份行是这一层的叶子，点整行没有歧义。
+   */
+  const namesPropsOf = (r: StatsRow) => {
+    if (!isMonthChild(r)) return {};
+    const open = openNames.includes(r.key);
+    const count = namesOf(r).length;
+    return {
+      role: 'button' as const,
+      tabIndex: 0,
+      title: `${open ? '收起' : '展开'} ${r.label} 的番剧名单（${count} 部）—— 点这一行任意位置都行`,
+      onClick: () => toggleNames(r.key),
+      onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNames(r.key); }
+      }
+    };
+  };
+
+  /** 行的类名：可展开的行加 `expandable`（悬停高亮 + 手型光标） */
+  const rowCls = (r: StatsRow, withNames = false): string =>
+    'bar-row' + (r.depth === 1 ? ' child' : '')
+    + (expandableYear(r) !== null || (withNames && isMonthChild(r)) ? ' expandable' : '');
 
   return (
     <section className="panel">
@@ -967,6 +1075,7 @@ function LibStatsPanel() {
             {chartTitle}
             <span style={{ marginLeft: 8, color: 'var(--txt-3)' }}>{hint}</span>
           </div>
+          <div className="ct" style={{ marginTop: -2, fontSize: 11 }}>{scopeHint}</div>
           {!rows.length && <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>暂无数据</div>}
           {rows.map(r => (
             <div className={rowCls(r)} key={r.key} {...rowPropsOf(r)}>
@@ -983,18 +1092,53 @@ function LibStatsPanel() {
         </div>
 
         <div className="chart">
-          <div className="ct">{detailTitle}</div>
+          <div className="ct">
+            {detailTitle}
+            <span style={{ marginLeft: 8, color: 'var(--txt-3)' }}>
+              · 点月份整行展开该月的番剧名单（默认折叠）→ 再点名单里的番剧名，左侧媒体库会直接跳到并高亮那个文件夹
+            </span>
+          </div>
           {!rows.length && <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>暂无数据</div>}
-          {rows.map(r => (
-            <div className={rowCls(r)} key={r.key} {...rowPropsOf(r)}>
-              {caretOf(r)}
-              <span className={labelCls(r)}>{r.label}</span>
-              <span style={{ flex: 1, color: 'var(--txt-2)' }}>
-                {r.animeCount} 部 · {r.fileCount} 个文件
-              </span>
-              <span className="vv">{formatSize(r.totalSize)}</span>
-            </div>
-          ))}
+          {rows.map(r => {
+            const list = isMonthChild(r) ? namesOf(r) : [];
+            const open = openNames.includes(r.key);
+            return (
+              <div key={r.key}>
+                <div
+                  className={rowCls(r, true)}
+                  {...(isMonthChild(r) ? namesPropsOf(r) : rowPropsOf(r))}
+                >
+                  {caretOf(r, true)}
+                  <span className={labelCls(r)}>{r.label}</span>
+                  <span style={{ flex: 1, color: 'var(--txt-2)' }}>
+                    {r.animeCount} 部 · {r.episodeCount} 集 · {r.fileCount} 个文件
+                  </span>
+                  <span className="vv">{formatSize(r.totalSize)}</span>
+                </div>
+                {isMonthChild(r) && open && list.length > 0 && (
+                  <div className="stat-names">
+                    {list.map(x => (
+                      <div
+                        className="stat-name-row"
+                        key={`${x.id}-${x.month ?? 0}`}
+                        role="button"
+                        tabIndex={0}
+                        title={`在左侧媒体库中定位「${x.name}」（${x.year}-${pad(x.month ?? 0)} · ${x.episodes} 集${x.spread ? ' · 跨季重复计入' : ''}）`}
+                        onClick={() => focusAnimeRow(x)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusAnimeRow(x); }
+                        }}
+                      >
+                        <span className="nm">{x.name}</span>
+                        {x.spread && <span className="sp" title="跨季重复计入">跨季</span>}
+                        <span className="ep">{x.episodes} 集</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>

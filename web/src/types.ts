@@ -247,6 +247,8 @@ export interface LibraryAnime {
   relPath: string;
   totalSize: number;
   fileCount: number;
+  /** 集数（= 顶层视频文件数 + 子目录数；SP / OP&ED 不算）。旧索引没有该字段 → 用 utils.animeEpisodes() 现算 */
+  episodes?: number;
   files: LibraryFile[];
   subDirs: LibrarySubDir[];
   special: boolean;
@@ -257,6 +259,8 @@ export interface YearStat {
   animeCount: number;
   fileCount: number;
   totalSize: number;
+  /** 集数合计（跨季分摊时会重复计入）；旧索引没有该字段 */
+  episodeCount?: number;
 }
 
 /** 按「年 + 月」聚合的统计（month = 0 表示只有年份、没有月份的兜底桶） */
@@ -266,17 +270,27 @@ export interface MonthStat {
   animeCount: number;
   fileCount: number;
   totalSize: number;
+  /** 集数合计（跨季分摊时会重复计入） */
+  episodeCount?: number;
 }
 
 export interface LibraryStats {
+  /* ---- 媒体库真实总量 ---- */
   animeCount: number;
   fileCount: number;
   totalSize: number;
   revertableCount: number;
   specialCount: number;
   years: YearStat[];
-  /** 按月份聚合（旧索引可能没有该字段 → 前端现算兑底） */
-  months?: MonthStat[];
+  /* ---- 图表口径（见 utils.computeAirStatsLocal 的说明）；旧索引没有这些字段 ---- */
+  /** 播出月份桶：集数 ≤3 不纳入；>14 集且在 1/4/7/10 月播出的按季度重复计入 */
+  airMonths?: MonthStat[];
+  /** 播出年份桶（同一年内同一部番剧只计一次） */
+  airYears?: YearStat[];
+  /** 被口径排除的番剧数（集数 ≤3） */
+  excludedShort?: number;
+  /** 做了跨季分摊的番剧数 */
+  spreadCount?: number;
 }
 
 export interface LibraryIndex {

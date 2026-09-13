@@ -14,13 +14,13 @@ import {
   LibraryIndex,
   LibraryStats,
   LibrarySubDir,
-  MonthStat,
   YearStat
 } from '../types';
 import { VIDEO_EXTS, toLongPath, DEFAULT_FS_CONCURRENCY } from '../fsx/fsx';
 import { Semaphore } from '../util/pool';
 import { compareByEpisode, parseName } from './parser';
 import { Store } from './store';
+import { animeEpisodes, computeAirStats } from './airStats';
 
 export const SPECIAL_DIRS = ['_未识别', '_待确认'];
 
@@ -145,7 +145,7 @@ async function buildAnime(
   const totalSize = files.reduce((a, f) => a + f.size, 0)
     + subDirs.reduce((a, s) => a + s.files.reduce((x, f) => x + f.size, 0), 0);
 
-  return {
+  const entry: LibraryAnime = {
     id: `a-${relPath.replace(/[\\/]/g, '-')}`,
     zhName: animeName,
     aliases: alternateNames,
@@ -156,10 +156,14 @@ async function buildAnime(
     relPath,
     totalSize,
     fileCount: files.length + subDirs.reduce((a, s) => a + s.files.length, 0),
+    // 集数 ≠ 文件数（多文件发布目录只算 1 集；SP/OP&ED 不算集），见 core/airStats.ts
+    episodes: 0,
     files,
     subDirs,
     special: false
   };
+  entry.episodes = animeEpisodes(entry);
+  return entry;
 }
 
 async function buildSpecial(
@@ -184,6 +188,7 @@ async function buildSpecial(
     relPath: dirName,
     totalSize: all.reduce((a, f) => a + f.size, 0),
     fileCount: all.length,
+    episodes: 0,
     files,
     subDirs,
     special: true
@@ -299,10 +304,15 @@ function findAlias(
 }
 
 /**
- * 统计（图表用）。**不含**特殊目录（`_未识别` / `_待确认`）。
+ * 统计（图表用）。
  *
- * 同时给出两种粒度：`years`（按年份）与 `months`（按年+月）——
- * 归档目录本身就是 `{年份}\{月份}\` 两级，月度统计能看出「当季追番」的分布。
+ * 两组数字：
+ *  - `animeCount` / `fileCount` / `totalSize` / `revertableCount` / `specialCount` / `years`
+ *    = 媒体库**真实总量**（按 `{年,月}` 文件夹聚合，每部番剧只算一次）；
+ *  - `airMonths` / `airYears` = **图表口径**（集数 ≤3 不纳入、>14 集且在 1/4/7/10 月播出的按季度重复计入），
+ *    详见 `core/airStats.ts`。
+ *
+ * 特殊目录（`_未识别` / `_待确认`）两组都不参与。
  */
 export function computeStats(anime: LibraryAnime[]): LibraryStats {
   const normal = anime.filter(a => !a.special);
@@ -311,28 +321,19 @@ export function computeStats(anime: LibraryAnime[]): LibraryStats {
 
   const allFiles = normal.flatMap(filesOf);
   const byYear = new Map<number, YearStat>();
-  const byMonth = new Map<string, MonthStat>();
   normal.forEach(a => {
     if (a.year === null) return;
     const fs = filesOf(a);
-    const fileCount = fs.length;
-    const totalSize = fs.reduce((x, f) => x + f.size, 0);
-
-    const cur = byYear.get(a.year) ?? { year: a.year, animeCount: 0, fileCount: 0, totalSize: 0 };
+    const cur = byYear.get(a.year)
+      ?? { year: a.year, animeCount: 0, fileCount: 0, totalSize: 0, episodeCount: 0 };
     cur.animeCount += 1;
-    cur.fileCount += fileCount;
-    cur.totalSize += totalSize;
+    cur.fileCount += fs.length;
+    cur.totalSize += fs.reduce((x, f) => x + f.size, 0);
+    cur.episodeCount += a.episodes;
     byYear.set(a.year, cur);
-
-    // 月份缺失（手工建的目录等）归到 month = 0 的兜底桶，界面上显示为「YYYY-未知」
-    const month = a.month ?? 0;
-    const key = `${a.year}-${month}`;
-    const mc = byMonth.get(key) ?? { year: a.year, month, animeCount: 0, fileCount: 0, totalSize: 0 };
-    mc.animeCount += 1;
-    mc.fileCount += fileCount;
-    mc.totalSize += totalSize;
-    byMonth.set(key, mc);
   });
+
+  const air = computeAirStats(anime);
 
   return {
     animeCount: normal.length,
@@ -341,6 +342,9 @@ export function computeStats(anime: LibraryAnime[]): LibraryStats {
     revertableCount: allFiles.filter(f => f.revertable).length,
     specialCount: specials.length,
     years: Array.from(byYear.values()).sort((a, b) => b.year - a.year),
-    months: Array.from(byMonth.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month))
+    airMonths: air.months,
+    airYears: air.years,
+    excludedShort: air.excludedShort,
+    spreadCount: air.spreadCount
   };
 }
