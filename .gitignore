@@ -1,0 +1,30 @@
+# ---- 依赖与构建产物 ----
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ---- 便携运行时（体积大；自行下载 Node，或按 README 放到 .tools/，都不入库）----
+.tools/
+
+# ---- 运行时数据（**含本机路径 / 媒体库清单 / 别名表 / 日志，绝不入库**）----
+# 服务端：config.json（里面有你的真实目录）、aliases.json、Bangumi 缓存、
+# last-scan 快照、执行状态、日志（每条都带完整文件路径）
+server/data/
+# 前端：媒体库索引的各个副本（library.json / library.js 会列出你所有番剧与文件名）
+web/data/
+web/public/data/
+web/dist/
+# 索引重建过程的临时/备份产物
+server/data/aliases.backup-*.json
+*.tmp
+
+# ---- 本地测试夹具 ----
+.e2e/
+*.probe
+
+# ---- 编辑器 / 系统 ----
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+desktop.ini

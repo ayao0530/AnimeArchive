@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>番剧归档助手 · Demo</title>
+<style>
+  :root{
+    --bg:#0e1117;
+    --bg-2:#151a23;
+    --bg-3:#1c2230;
+    --line:#262e3d;
+    --line-2:#323c4f;
+    --txt:#e6ebf2;
+    --txt-2:#9aa7bd;
+    --txt-3:#697691;
+    --accent:#7c5cff;
+    --accent-2:#3ba9ff;
+    --ok:#27c08a;
+    --warn:#f2b632;
+    --err:#ef5566;
+    --conf:#f2802b;
+    --done:#3ba9ff;
+    --radius:12px;
+    --txt-strong:#ffffff;
+    --shadow:0 18px 50px rgba(0,0,0,.55);
+    --topbar-bg:rgba(21,26,35,.85);
+    --toolbar-bg:rgba(14,17,23,.6);
+    --panel-bg:rgba(21,26,35,.7);
+    --panel-head-bg:rgba(28,34,48,.6);
+    --hover-bg:rgba(124,92,255,.07);
+  }
+  /* 浅色主题（data-theme="light" 或系统为浅色且未手动指定深色） */
+  :root[data-theme="light"]{
+    --bg:#f4f6fb; --bg-2:#ffffff; --bg-3:#eef1f7;
+    --line:#e3e7f0; --line-2:#ccd4e2;
+    --txt:#1b2233; --txt-2:#55607a; --txt-3:#8b95ab;
+    --txt-strong:#0d1320;
+    --shadow:0 16px 40px rgba(24,32,54,.16);
+    --topbar-bg:rgba(255,255,255,.9);
+    --toolbar-bg:rgba(255,255,255,.7);
+    --panel-bg:rgba(255,255,255,.85);
+    --panel-head-bg:rgba(238,241,247,.85);
+    --hover-bg:rgba(124,92,255,.08);
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f4f6fb; --bg-2:#ffffff; --bg-3:#eef1f7;
+      --line:#e3e7f0; --line-2:#ccd4e2;
+      --txt:#1b2233; --txt-2:#55607a; --txt-3:#8b95ab;
+      --txt-strong:#0d1320;
+      --shadow:0 16px 40px rgba(24,32,54,.16);
+      --topbar-bg:rgba(255,255,255,.9);
+      --toolbar-bg:rgba(255,255,255,.7);
+      --panel-bg:rgba(255,255,255,.85);
+      --panel-head-bg:rgba(238,241,247,.85);
+      --hover-bg:rgba(124,92,255,.08);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(124,92,255,.18), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(59,169,255,.12), transparent 55%),
+      var(--bg);
+    color:var(--txt);
+    font-family:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans",system-ui,sans-serif;
+    font-size:13.5px;
+    display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#2c3648;border-radius:6px}
+  ::-webkit-scrollbar-thumb:hover{background:#3b475f}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---------- 顶栏 ---------- */
+  .topbar{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:12px 18px;background:var(--topbar-bg);
+    border-bottom:1px solid var(--line);backdrop-filter:blur(8px);
+  }
+  .brand{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600;white-space:nowrap}
+  .brand .logo{
+    width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));font-size:14px;
+  }
+  .tag{
+    font-size:10.5px;padding:2px 7px;border-radius:20px;font-weight:600;
+    background:rgba(124,92,255,.18);color:#b7a5ff;border:1px solid rgba(124,92,255,.35);
+  }
+  .paths{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;min-width:320px}
+  .path-group{display:flex;align-items:center;gap:7px;background:var(--bg-3);
+    border:1px solid var(--line);border-radius:9px;padding:5px 10px;flex:1;min-width:210px}
+  .path-group label{color:var(--txt-3);font-size:11.5px;white-space:nowrap}
+  .path-group input{
+    background:transparent;border:0;outline:0;color:var(--txt);
+    font-family:inherit;font-size:12.5px;width:100%;
+  }
+  .arrow-sep{color:var(--txt-3);font-size:14px}
+  .actions{display:flex;gap:8px}
+  button{
+    font-family:inherit;font-size:12.5px;cursor:pointer;border-radius:9px;
+    padding:7px 14px;border:1px solid var(--line-2);background:var(--bg-3);color:var(--txt);
+    transition:.16s;white-space:nowrap;
+  }
+  button:hover{background:var(--bg-3);border-color:var(--line-2);transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  button.primary{
+    background:linear-gradient(135deg,var(--accent),#5a86ff);border-color:transparent;
+    color:#fff;font-weight:600;box-shadow:0 4px 14px rgba(124,92,255,.32);
+  }
+  button.primary:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+
+  /* ---------- 工具条 ---------- */
+  .toolbar{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:9px 18px;border-bottom:1px solid var(--line);background:var(--toolbar-bg);
+  }
+  .search{
+    display:flex;align-items:center;gap:8px;flex:1;min-width:280px;
+    background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:7px 12px;
+    transition:.16s;
+  }
+  .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,92,255,.14)}
+  .search input{background:transparent;border:0;outline:0;color:var(--txt);font-family:inherit;font-size:13px;width:100%}
+  .search .ico{color:var(--txt-3)}
+  .chips{display:flex;gap:6px}
+  .chip{
+    font-size:11.5px;padding:5px 11px;border-radius:20px;border:1px solid var(--line-2);
+    background:var(--bg-3);color:var(--txt-2);cursor:pointer;transition:.16s;user-select:none;
+  }
+  .chip:hover{color:var(--txt);border-color:#4a5772}
+  .chip.on{background:rgba(124,92,255,.16);border-color:var(--accent);color:#c3b6ff}
+  .seg{display:flex;background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg span{
+    font-size:12px;padding:5px 13px;border-radius:7px;cursor:pointer;color:var(--txt-2);transition:.16s;
+  }
+  .seg span.on{background:var(--accent);color:#fff;font-weight:600}
+
+  /* ---------- 布局 ---------- */
+  .layout{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 18px;min-height:0}
+  .panel{
+    display:flex;flex-direction:column;min-height:0;
+    background:var(--panel-bg);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  }
+  .panel-head{
+    display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--line);
+    background:var(--panel-head-bg);font-weight:600;font-size:13px;
+  }
+  .panel-head .hint{font-weight:400;font-size:11.5px;color:var(--txt-3);margin-left:auto}
+  .panel-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .panel-body > *{flex:0 0 auto}
+
+  /* ---------- 左侧分组卡片 ---------- */
+  .card{
+    border:1px solid var(--line);border-left:3px solid var(--txt-3);
+    border-radius:10px;background:var(--bg-2);transition:.18s;overflow:hidden;
+  }
+  .card:hover{border-color:var(--line-2);transform:translateX(2px);background:var(--bg-3)}
+  .card.linked{box-shadow:0 0 0 2px rgba(124,92,255,.35);border-color:var(--accent)}
+  .card.ok{border-left-color:var(--ok)}
+  .card.review{border-left-color:var(--warn)}
+  .card.unrecognized{border-left-color:var(--err)}
+  .card.conflict{border-left-color:var(--conf)}
+  .card.done{opacity:.78;border-left-color:var(--done)}
+  .card-main{padding:10px 12px;cursor:pointer}
+  .name-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .raw-name{color:var(--txt-2);font-size:12px;word-break:break-all}
+  .to-arrow{color:var(--accent-2);font-weight:700}
+  .zh-name{font-weight:600;font-size:13.5px;color:var(--txt-strong);word-break:break-all}
+  .zh-name.hit{background:rgba(242,182,50,.28);border-radius:4px;padding:0 2px;color:#ffe9b0}
+  mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2px}
+  .meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px}
+  .pill{
+    font-size:10.5px;padding:2.5px 8px;border-radius:20px;border:1px solid var(--line-2);
+    color:var(--txt-2);background:rgba(50,60,79,.4);white-space:nowrap;
+  }
+  .pill.ok{color:#7fe6bf;border-color:rgba(39,192,138,.45);background:rgba(39,192,138,.12)}
+  .pill.warn{color:#ffd47a;border-color:rgba(242,182,50,.45);background:rgba(242,182,50,.12)}
+  .pill.err{color:#ff9aa5;border-color:rgba(239,85,102,.45);background:rgba(239,85,102,.12)}
+  .pill.conf{color:#ffbd85;border-color:rgba(242,128,43,.45);background:rgba(242,128,43,.12)}
+  .pill.src{color:#9fd0ff;border-color:rgba(59,169,255,.4);background:rgba(59,169,255,.1)}
+  .target-line{
+    display:flex;align-items:center;gap:7px;margin-top:8px;padding:6px 9px;
+    background:rgba(59,169,255,.07);border:1px dashed rgba(59,169,255,.3);
+    border-radius:7px;font-size:11.5px;color:#9fd0ff;font-family:Consolas,"Cascadia Mono",monospace;
+    word-break:break-all;
+  }
+  .items{margin:0;padding:0 12px 10px 12px;list-style:none;display:flex;flex-direction:column;gap:1px}
+  .items li{
+    display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:6px;
+    font-size:11.5px;color:var(--txt-2);
+  }
+  .items li:hover{background:rgba(124,92,255,.09);color:var(--txt)}
+  .items .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Consolas,monospace}
+  .items .fsize{color:var(--txt-3);font-size:10.5px;white-space:nowrap}
+  .ep-badge{
+    font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;
+    background:rgba(124,92,255,.2);color:#c3b6ff;white-space:nowrap;
+  }
+  .dir-badge{color:#ffd47a}
+
+  /* ---------- 右侧归档树 ---------- */
+  .tree{display:flex;flex-direction:column;gap:6px}
+  .node-year{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg-2)}
+  .row{display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;transition:.14s}
+  .row:hover{background:rgba(124,92,255,.07)}
+  .row .caret{color:var(--txt-3);font-size:10px;width:10px;transition:.2s}
+  .row.collapsed .caret{transform:rotate(-90deg)}
+  .row .label{font-weight:600;font-size:12.5px}
+  .row .count{margin-left:auto;font-size:10.5px;color:var(--txt-3)}
+  .children{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+  .children.hidden{display:none}
+  .node-month{padding-left:14px}
+  .node-anime{padding-left:26px;border-radius:8px;margin:2px 6px}
+  .node-anime.target-flash{animation:flashTarget 1.1s ease}
+  @keyframes flashTarget{
+    0%{background:rgba(124,92,255,.42);box-shadow:0 0 0 3px rgba(124,92,255,.45)}
+    100%{background:transparent;box-shadow:none}
+  }
+  .node-anime.linked{background:rgba(124,92,255,.14);box-shadow:inset 0 0 0 1px rgba(124,92,255,.4)}
+  .file-row{
+    display:flex;align-items:center;gap:8px;padding:4px 11px 4px 40px;font-size:11.5px;
+    color:var(--txt-2);border-radius:6px;
+  }
+  .file-row:hover{background:rgba(59,169,255,.08);color:var(--txt)}
+  .file-row .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Consolas,monospace}
+  .file-row .from{font-size:10px;color:var(--txt-3);white-space:nowrap}
+  .file-row .dot{width:6px;height:6px;border-radius:50%;flex:none}
+  .empty{color:var(--txt-3);text-align:center;padding:36px 10px;font-size:12.5px;line-height:1.9}
+  .empty code{background:var(--bg-3);padding:1px 6px;border-radius:5px;color:#c3b6ff;font-size:11.5px}
+
+  /* ---------- 对照列表 ---------- */
+  .diff-table{width:100%;border-collapse:collapse;font-size:11.5px;font-family:Consolas,monospace}
+  .diff-table th{
+    position:sticky;top:0;background:var(--bg-3);color:var(--txt-2);font-weight:600;
+    text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-2);font-family:inherit;font-size:11.5px;
+    z-index:1;
+  }
+  .diff-table td{padding:7px 10px;border-bottom:1px solid rgba(38,46,61,.7);vertical-align:top;word-break:break-all}
+  .diff-table tr:hover td{background:rgba(124,92,255,.06)}
+  .diff-from{color:var(--txt-2)}
+  .diff-to{color:#8fd8ff}
+  .diff-arrow{color:var(--accent-2);text-align:center;width:26px}
+
+  /* ---------- 状态栏 ---------- */
+  .statusbar{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:8px 18px;border-top:1px solid var(--line);background:var(--topbar-bg);font-size:12px;
+  }
+  .stat{display:flex;align-items:center;gap:6px;color:var(--txt-2)}
+  .stat b{color:var(--txt);font-weight:600}
+  .stat .dot{width:8px;height:8px;border-radius:50%}
+  .statusbar .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .progress-wrap{width:150px;height:5px;background:var(--bg-3);border-radius:4px;overflow:hidden;display:none}
+  .progress-wrap.on{display:block}
+  .progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .25s}
+
+  /* ---------- 日志抽屉 ---------- */
+  .logpanel{
+    position:fixed;right:18px;bottom:56px;width:520px;max-height:44vh;
+    background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;
+    box-shadow:var(--shadow);display:none;flex-direction:column;overflow:hidden;z-index:40;
+  }
+  .logpanel.on{display:flex}
+  .logpanel header{
+    display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid var(--line);
+    font-weight:600;font-size:12.5px;background:var(--panel-head-bg);
+  }
+  .logpanel header .close{margin-left:auto;cursor:pointer;color:var(--txt-3)}
+  .logpanel header .close:hover{color:var(--txt)}
+  .log-body{overflow-y:auto;padding:8px 12px;font-family:Consolas,monospace;font-size:11.5px;line-height:1.75}
+  .log-line{display:flex;gap:8px;padding:2px 0;color:var(--txt-2)}
+  .log-line .t{color:var(--txt-3)}
+  .log-line.ok .msg{color:#7fe6bf}
+  .log-line.warn .msg{color:#ffd47a}
+  .log-line.err .msg{color:#ff9aa5}
+  .log-line .msg{flex:1;word-break:break-all}
+
+  /* ---------- toast ---------- */
+  #toast{
+    position:fixed;left:50%;bottom:78px;transform:translateX(-50%) translateY(20px);
+    background:var(--bg-2);border:1px solid var(--line-2);color:var(--txt);
+    padding:11px 20px;border-radius:11px;font-size:13px;box-shadow:0 12px 34px rgba(0,0,0,.5);
+    opacity:0;transition:.28s;pointer-events:none;z-index:60;display:flex;align-items:center;gap:9px;
+  }
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--txt-3);padding:0 18px 6px}
+  .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+  /* ---------- 一级导航 / 视图容器 / 主题 ---------- */
+  .nav{display:flex;gap:3px;background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:3px}
+  .nav span{
+    font-size:12.5px;padding:6px 15px;border-radius:8px;cursor:pointer;color:var(--txt-2);
+    transition:.16s;user-select:none;white-space:nowrap;
+  }
+  .nav span:hover{color:var(--txt)}
+  .nav span.on{
+    background:linear-gradient(135deg,var(--accent),#5a86ff);color:#fff;font-weight:600;
+    box-shadow:0 3px 10px rgba(124,92,255,.3);
+  }
+  .views{flex:1;display:flex;flex-direction:column;min-height:0}
+  .views[hidden]{display:none}
+  .theme-btn{font-size:12px;padding:6px 12px}
+
+  /* ---------- 媒体库 ---------- */
+  .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:12px;width:100%}
+  .stat-card{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .stat-card .k{font-size:11px;color:var(--txt-3)}
+  .stat-card .v{font-size:19px;font-weight:700;margin-top:3px;color:var(--txt-strong)}
+  .stat-card .v small{font-size:11px;font-weight:500;color:var(--txt-2);margin-left:3px}
+  .chart{display:flex;flex-direction:column;gap:8px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;width:100%}
+  .chart .ct{font-size:11.5px;color:var(--txt-3);margin-bottom:2px}
+  .bar-row{display:flex;align-items:center;gap:9px;font-size:11.5px}
+  .bar-row .y{width:40px;color:var(--txt-2);font-family:Consolas,monospace}
+  .bar-track{flex:1;height:14px;background:var(--bg-3);border-radius:5px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .5s}
+  .bar-row .vv{width:92px;text-align:right;color:var(--txt-2);font-family:Consolas,monospace}
+  .lib-anime{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:0 0 auto}
+  .lib-anime .arow{display:flex;align-items:center;gap:9px;padding:9px 12px;transition:.14s}
+  .lib-anime .arow:hover{background:var(--hover-bg)}
+  .lib-anime .aname{font-weight:600;font-size:13px}
+  .lib-anime .aalias{font-size:11px;color:var(--txt-3);margin-top:2px;word-break:break-all}
+  .lib-file{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 22px;font-size:11.5px;color:var(--txt-2)}
+  .lib-file:hover{background:var(--hover-bg);color:var(--txt)}
+  .lib-file .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Consolas,monospace}
+  .lib-file .fsz{font-size:10.5px;color:var(--txt-3);font-family:Consolas,monospace;white-space:nowrap}
+  .lib-sub{font-size:11.5px;color:var(--txt-3);padding:5px 12px 3px 22px;font-weight:600}
+  .special-head{
+    font-size:11.5px;color:var(--txt-3);padding:14px 4px 6px;margin-top:10px;
+    border-top:1px dashed var(--line-2);width:100%;
+  }
+  .lib-anime.special{border-style:dashed;opacity:.9}
+  .lib-anime.special .aname{color:var(--txt-2)}
+  .mini{
+    font-size:10.5px;padding:2.5px 9px;border-radius:6px;border:1px solid var(--line-2);
+    background:var(--bg-3);color:var(--txt-2);cursor:pointer;white-space:nowrap;transition:.14s;
+  }
+  .mini:hover{color:var(--txt);border-color:var(--accent);background:var(--hover-bg)}
+  .mini.play:hover{color:#1aa06e;border-color:rgba(39,192,138,.6)}
+  .mini.rev:hover{color:#c98a00;border-color:rgba(242,182,50,.6)}
+  .mini:disabled{opacity:.35;cursor:not-allowed;border-color:var(--line)}
+  .mini.conflict-btn:hover{color:#ffbd85;border-color:rgba(242,128,43,.7)}
+  .mini.resolve-btn:hover{color:#ffd47a;border-color:rgba(242,182,50,.7)}
+  .card-foot{display:flex;align-items:center;gap:9px;padding:2px 12px 11px 12px;flex-wrap:wrap}
+  .ft-hint{font-size:11px;color:var(--txt-3)}
+
+  /* ---------- 弹窗 ---------- */
+  .modal-mask{
+    position:fixed;inset:0;background:rgba(6,9,15,.6);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;z-index:80;padding:24px;
+  }
+  .modal-mask[hidden]{display:none}
+  .modal{
+    width:min(700px,100%);max-height:86vh;overflow:auto;background:var(--bg-2);
+    border:1px solid var(--line-2);border-radius:14px;box-shadow:var(--shadow);
+    animation:pop .18s ease;display:flex;flex-direction:column;
+  }
+  @keyframes pop{from{transform:translateY(10px) scale(.985);opacity:.5}to{transform:none;opacity:1}}
+  .modal h3{
+    margin:0;padding:14px 18px;font-size:13.5px;border-bottom:1px solid var(--line);
+    background:var(--panel-head-bg);display:flex;align-items:center;gap:8px;
+  }
+  .modal .mbody{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+  .modal .mfoot{
+    display:flex;gap:9px;justify-content:flex-end;padding:12px 18px;
+    border-top:1px solid var(--line);background:var(--panel-head-bg);
+  }
+  .kv{display:flex;gap:9px;font-size:12px;align-items:flex-start}
+  .kv .k{color:var(--txt-3);width:80px;flex:none}
+  .kv .v{color:var(--txt);font-family:Consolas,"Cascadia Mono",monospace;word-break:break-all}
+  .warn-box{
+    background:rgba(242,128,43,.1);border:1px solid rgba(242,128,43,.35);
+    border-radius:9px;padding:10px 12px;font-size:12px;color:#ffbd85;line-height:1.7;
+  }
+  .opt{
+    display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line);
+    border-radius:9px;cursor:pointer;transition:.14s;background:var(--bg-3);
+  }
+  .opt:hover{border-color:var(--line-2)}
+  .opt.on{border-color:var(--accent);background:var(--hover-bg);box-shadow:0 0 0 2px rgba(124,92,255,.16)}
+  .opt .o-i{width:15px;height:15px;border-radius:50%;border:2px solid var(--line-2);flex:none;margin-top:2px}
+  .opt.on .o-i{border-color:var(--accent);background:radial-gradient(circle,var(--accent) 0 4px,transparent 5px)}
+  .opt .o-t{font-size:12.5px;color:var(--txt)}
+  .opt .o-d{font-size:11px;color:var(--txt-3);margin-top:3px;line-height:1.6}
+  .opt .o-d code{background:var(--bg-2);padding:1px 5px;border-radius:4px;font-size:10.5px}
+  .opt .o-s{margin-left:auto;font-size:11px;color:var(--txt-3);font-family:Consolas,monospace;white-space:nowrap;padding-left:8px}
+  .field{display:flex;gap:9px;align-items:center;font-size:12px}
+  .field > .fk{color:var(--txt-3);width:80px;flex:none}
+  .field input,.field select{
+    flex:1;min-width:0;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;
+    padding:7px 10px;color:var(--txt);font-family:inherit;font-size:12.5px;outline:0;
+  }
+  .field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,92,255,.14)}
+  .svc{
+    display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--txt-2);
+    background:var(--bg-3);border:1px solid var(--line);border-radius:20px;padding:5px 12px;white-space:nowrap;
+  }
+  .svc .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(39,192,138,.18);flex:none}
+  .svc.off .dot{background:var(--txt-3);box-shadow:none}
+  .svc.off{color:var(--txt-3);border-style:dashed}
+
+  @media (max-width:1080px){
+    .layout{grid-template-columns:1fr;overflow-y:auto}
+    .panel{min-height:340px}
+    .logpanel{width:calc(100% - 36px)}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= 顶栏 ================= -->
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🎬</span>
+    <span>番剧归档助手</span>
+    <span class="tag">DEMO · 模拟数据</span>
+  </div>
+
+  <div class="nav" id="nav">
+    <span class="on" data-v="archive">① 归档整理</span>
+    <span data-v="library">② 媒体库</span>
+  </div>
+
+  <div class="paths" id="pathsArchive">
+    <div class="path-group">
+      <label>源目录</label>
+      <input id="srcPath" value="\\NAS\Media" spellcheck="false" />
+    </div>
+    <span class="arrow-sep">➜</span>
+    <div class="path-group">
+      <label>归档根目录</label>
+      <input id="dstPath" value="\\NAS\Media\已看\Anime" spellcheck="false" />
+    </div>
+  </div>
+
+  <div class="actions" id="actionsArchive">
+    <button id="btnScan">↻ 重新扫描</button>
+    <button id="btnUndo" disabled>↩ 撤销整批</button>
+    <button id="btnRun" class="primary">▶ 执行归档</button>
+  </div>
+
+  <span class="svc" id="svcState"><span class="dot"></span><span id="svcText">本地服务运行中 · 127.0.0.1:9999</span></span>
+  <button id="btnTheme" class="theme-btn" title="切换主题（跟随系统 / 深色 / 浅色）">🌓 跟随系统</button>
+  <button id="btnService" class="theme-btn" title="一键启动 / 关闭本地服务">⏻ 关闭服务</button>
+</header>
+
+<!-- ================= 工具条（归档整理视图） ================= -->
+<div class="toolbar" id="toolbarArchive">
+  <div class="search">
+    <span class="ico">🔍</span>
+    <input id="q" placeholder="预览内定位：番剧名 / 中文名 / 文件名 / year:2021 / month:04 / ep:04 ..." spellcheck="false" />
+    <span id="clearQ" style="cursor:pointer;color:#697691;display:none">✕</span>
+  </div>
+  <div class="chips" id="chips">
+    <span class="chip on" data-f="all">全部</span>
+    <span class="chip" data-f="ready">可归档</span>
+    <span class="chip" data-f="review">待确认</span>
+    <span class="chip" data-f="conflict">冲突</span>
+    <span class="chip" data-f="unrecognized">未识别</span>
+  </div>
+  <div class="seg" id="segView">
+    <span class="on" data-v="tree">树形视图</span>
+    <span data-v="diff">对照列表</span>
+  </div>
+</div>
+
+<!-- ================= 主体（视图①：归档整理） ================= -->
+<div class="views" id="viewArchive">
+<main class="layout">
+  <section class="panel">
+    <div class="panel-head">
+      <span>📥 原始文件区</span>
+      <span class="hint" id="srcHint">源目录：D:\Downloads\Anime</span>
+    </div>
+    <div class="panel-body" id="sourceList"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span id="targetTitle">📂 归档结果区</span>
+      <span class="hint">年份 / 月份 / 官方中文名</span>
+    </div>
+    <div class="panel-body" id="targetList"></div>
+  </section>
+</main>
+
+<div class="legend">
+  <span><i style="background:#27c08a"></i>可归档（高置信度）</span>
+  <span><i style="background:#f2b632"></i>待确认（中置信度）</span>
+  <span><i style="background:#f2802b"></i>冲突（同名已存在）</span>
+  <span><i style="background:#ef5566"></i>未识别</span>
+  <span><i style="background:#3ba9ff"></i>已完成</span>
+  <span>💡 点击左侧卡片可定位到右侧归档位置</span>
+  <span>SP / OVA → 单独存入番剧目录下的 <b>SP</b> 子目录；OP / ED → <b>OP&amp;ED</b> 子目录</span>
+  <span>💡 点击卡片上的「⚙ 处理冲突」/「🔎 确认名称」可体验实际操作效果</span>
+  <span>✏️ 支持<b>手动重命名番剧文件夹名</b>：归档结果区只改方案，媒体库会真实改名（需服务）；文件名永不改动</span>
+</div>
+
+<!-- ================= 状态栏 ================= -->
+<footer class="statusbar">
+  <span class="stat"><span class="dot" style="background:#7c5cff"></span>组 <b id="sGroups">0</b></span>
+  <span class="stat"><span class="dot" style="background:#3ba9ff"></span>文件/文件夹 <b id="sItems">0</b></span>
+  <span class="stat"><span class="dot" style="background:#27c08a"></span>可归档 <b id="sReady">0</b></span>
+  <span class="stat"><span class="dot" style="background:#f2b632"></span>待确认 <b id="sReview">0</b></span>
+  <span class="stat"><span class="dot" style="background:#f2802b"></span>冲突 <b id="sConflict">0</b></span>
+  <span class="stat"><span class="dot" style="background:#ef5566"></span>未识别 <b id="sUnk">0</b></span>
+  <span class="stat" id="stFiltered"></span>
+  <div class="right">
+    <div class="progress-wrap" id="progWrap"><div class="progress-bar" id="progBar"></div></div>
+    <button id="btnLog">📜 变更日志</button>
+  </div>
+</footer>
+</div><!-- /viewArchive -->
+
+<!-- ================= 视图②：媒体库（已看/Anime） ================= -->
+<div class="views" id="viewLibrary" hidden>
+  <div class="toolbar">
+    <div class="search">
+      <span class="ico">🔍</span>
+      <input id="libQ" placeholder="检索媒体库：番剧名 / 别名 / 文件名 / year:2022 ..." spellcheck="false" />
+      <span id="libClear" style="cursor:pointer;color:var(--txt-3);display:none">✕</span>
+    </div>
+    <div class="seg" id="segChart">
+      <span class="on" data-c="count">番剧数量</span>
+      <span data-c="size">占用空间</span>
+    </div>
+    <button id="btnReindex">↻ 重建索引</button>
+  </div>
+
+  <main class="layout">
+    <section class="panel">
+      <div class="panel-head">
+        <span>📺 媒体库</span>
+        <span class="hint" id="libHint">\\NAS\Media\已看\Anime</span>
+      </div>
+      <div class="panel-body" id="libList"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>📊 统计与图表</span>
+        <span class="hint" id="libIndexInfo">索引已加载</span>
+      </div>
+      <div class="panel-body">
+        <div class="stats-grid" id="libStats"></div>
+        <div class="chart" id="libChart"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ================= 日志抽屉 ================= -->
+<div class="logpanel" id="logPanel">
+  <header>
+    <span>📜 变更日志（归档 / 播放 / 撤回）</span>
+    <span class="close" id="logClose">✕</span>
+  </header>
+  <div class="log-body" id="logBody">
+    <div class="log-line"><span class="msg" style="color:#697691">尚未有操作。可在「① 归档整理」执行归档，或在「② 媒体库」点击 ▶ 播放 / ↩ 撤回。</span></div>
+  </div>
+</div>
+
+<!-- ================= 弹窗 ================= -->
+<div class="modal-mask" id="modalMask" hidden>
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   模拟数据（不进行任何真实文件操作）
+   ========================================================= */
+const DATA = [
+  {
+    id: "g1",
+    raw: "Full Dive",
+    zh: "这算是哪门子的全能幻想RPG啊！",
+    lang: "日语罗马音",
+    year: 2021, month: 4,
+    source: "Bangumi", level: "L2", conf: 0.97, status: "ready",
+    group: "Lilith-Raws", type: "TV",
+    items: [
+      { name: "[Lilith-Raws] Full Dive - 04 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", dir:false, ep:"04", size:"289 MB" },
+      { name: "[Lilith-Raws] Full Dive - 03 [Baha][WEB-DL][1080p][AVC AAC]", dir:true, ep:"03", size:"274 MB", note:"文件夹 · 内含 1 个文件" }
+    ]
+  },
+  {
+    id: "g2",
+    raw: "転生したらスライムだった件",
+    zh: "关于我转生变成史莱姆这档事",
+    lang: "日语原文",
+    year: 2018, month: 10,
+    source: "Bangumi", level: "L2", conf: 0.95, status: "ready",
+    group: "ANi", type: "TV",
+    items: [
+      { name: "[ANi] 転生したらスライムだった件 - 12 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4", dir:false, ep:"12", size:"412 MB" }
+    ]
+  },
+  {
+    id: "g3",
+    raw: "Bocchi the Rock!",
+    zh: "孤独摇滚！",
+    lang: "英文 / 罗马音",
+    year: 2022, month: 10,
+    source: "Bangumi", level: "L2", conf: 0.99, status: "ready",
+    group: "喵萌奶茶屋", type: "TV",
+    items: [
+      { name: "[喵萌奶茶屋] ぼっち・ざ・ろっく！ - 01 [1080p][简日双语].mp4", dir:false, ep:"01", size:"356 MB" },
+      { name: "[喵萌奶茶屋] ぼっち・ざ・ろっく！ - 02 [1080p][简日双语].mp4", dir:false, ep:"02", size:"341 MB" },
+      { name: "[喵萌奶茶屋] ぼっち・ざ・ろっく！ - SP01 [1080p][简日双语].mp4", dir:false, ep:"SP01", size:"188 MB", note:"→ 单独存入 SP/ 子目录" }
+    ]
+  },
+  {
+    id: "g4",
+    raw: "Spy x Family",
+    zh: "间谍过家家",
+    lang: "英文",
+    year: 2022, month: 4,
+    source: "Bangumi", level: "L2", conf: 0.98, status: "conflict",
+    group: "Lilith-Raws", type: "TV",
+    note: "目标目录中已存在同名文件，将按策略自动重命名为 (1)",
+    items: [
+      { name: "[Lilith-Raws] Spy x Family - 05 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", dir:false, ep:"05", size:"298 MB" }
+    ]
+  },
+  {
+    id: "g5",
+    raw: "Bokutachi wa Benkyou ga Dekinai",
+    zh: "我们无法一起学习",
+    lang: "日语罗马音",
+    year: 2019, month: 4,
+    source: "Bangumi", level: "L2", conf: 0.93, status: "ready",
+    group: "Sakurato", type: "TV",
+    items: [
+      { name: "[Sakurato] Bokutachi wa Benkyou ga Dekinai - 01 [1080p][CHS].mkv", dir:false, ep:"01", size:"520 MB" }
+    ]
+  },
+  {
+    id: "g6",
+    raw: "Kimetsu no Yaiba",
+    zh: "鬼灭之刃",
+    lang: "日语罗马音",
+    year: 2019, month: 4,
+    source: "Bangumi", level: "L1", conf: 0.96, status: "ready",
+    group: "Nekomoe kissaten", type: "TV",
+    items: [
+      { name: "[Nekomoe kissaten] Kimetsu no Yaiba - 02 [1080p][BDRip][CHS].mkv", dir:false, ep:"02", size:"604 MB" },
+      { name: "[Nekomoe kissaten] Kimetsu no Yaiba - 01 [1080p][BDRip][CHS]", dir:true, ep:"01", size:"598 MB", note:"文件夹 · 内含 2 个文件" }
+    ]
+  },
+  {
+    id: "g7",
+    raw: "Sono Bisque Doll wa Koi wo Suru",
+    zh: "更衣人偶坠入爱河",
+    lang: "日语罗马音",
+    year: 2022, month: 1,
+    source: "AniList", level: "L3", conf: 0.88, status: "review",
+    group: "北宇治字幕组", type: "TV",
+    note: "在线库存在多个候选译名（更衣人偶坠入爱河 / 恋上换装娃娃），建议人工确认",
+    items: [
+      { name: "[北宇治字幕组] その着せ替え人形は恋をする - 03 [1080P][WebRip][HEVC][简繁日内封].mkv", dir:false, ep:"03", size:"780 MB" }
+    ]
+  },
+  {
+    id: "g8",
+    raw: "Kanojo mo Kanojo",
+    zh: "女朋友 and 女朋友",
+    lang: "日语罗马音",
+    year: 2021, month: 7,
+    source: "模糊匹配", level: "L3", conf: 0.72, status: "review",
+    group: "Sakurato", type: "TV",
+    note: "候选歧义：与《女朋友 and 女朋友》第 2 季相似度接近，需人工确认季数",
+    items: [
+      { name: "[Sakurato] Kanojo mo Kanojo - 07 [1080p][CHS].mp4", dir:false, ep:"07", size:"265 MB" }
+    ]
+  },
+  {
+    id: "g9",
+    raw: "Re:Zero kara Hajimeru Isekai Seikatsu",
+    zh: "Re:从零开始的异世界生活",
+    lang: "日语罗马音",
+    year: 2016, month: 4,
+    source: "Bangumi", level: "L1", conf: 0.91, status: "ready",
+    group: "ANi", type: "TV",
+    items: [
+      { name: "[ANi] Re-Zero kara Hajimeru Isekai Seikatsu - 18 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4", dir:false, ep:"18", size:"331 MB" }
+    ]
+  },
+  {
+    id: "g10",
+    raw: "[Unknown]",
+    zh: "",
+    lang: "无法解析",
+    year: null, month: null,
+    source: "—", level: "—", conf: 0.31, status: "unrecognized",
+    group: "—", type: "—",
+    note: "未能从文件名中提取有效番剧名，将移入 _未识别/，不会误归档",
+    items: [
+      { name: "[Group] [Unknown] - 01.mp4", dir:false, ep:"01", size:"—" }
+    ]
+  },
+  {
+    id: "g11",
+    raw: "謎のアニメ",
+    zh: "謎のアニメ",
+    lang: "日语原文",
+    year: 2023, month: 1,
+    source: "Bangumi（无中文译名）", level: "L3", conf: 0.74, status: "review",
+    group: "某组", type: "TV",
+    note: "Bangumi 无中文译名 → 按兜底规则使用日文原名（不使用罗马音），请确认",
+    items: [
+      { name: "[某组] 謎のアニメ - 01 [1080p][CHS].mp4", dir:false, ep:"01", size:"312 MB" }
+    ]
+  }
+];
+
+const STATUS_TEXT = {
+  ready: "可归档", review: "待确认", conflict: "冲突",
+  unrecognized: "未识别", deferred: "待处理", skipped: "已跳过", done: "已完成"
+};
+const STATUS_CLASS = {
+  ready: "ok", review: "warn", conflict: "conf", unrecognized: "err",
+  deferred: "src", skipped: "src", done: "src"
+};
+
+/* =========================================================
+   状态
+   ========================================================= */
+const state = {
+  q: "",
+  filter: "all",
+  view: "tree",
+  done: {},          // groupId -> true
+  collapsed: {},     // "year" / "year-month" 折叠状态
+  expanded: {},      // groupId -> 是否展开文件列表
+  lastBatch: []
+};
+
+/* =========================================================
+   工具函数
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const pad = n => String(n).padStart(2, "0");
+
+function padEpisode(ep){
+  if (!ep) return "";
+  const m = String(ep).match(/^(\d+)(.*)$/);
+  return m ? m[1].padStart(2, "0") + m[2] : ep;
+}
+
+/** 目标目录：年份/月份/官方中文名；未识别 / 待处理 进特殊目录 */
+function targetDir(g){
+  if (g.status === "unrecognized")
+    return "_未识别/" + g.items[0].name.replace(/\.[^.]+$/, "") + "/";
+  if (g.status === "deferred")
+    return "_待确认/" + (g.zh || g.raw || "未知").replace(/[\\/:*?"<>|]/g, "_") + "/";
+  return g.year + "/" + pad(g.month) + "/" + g.zh + "/";
+}
+
+/** 归档后的最终文件名（冲突选「自动重命名 (1)」后会有 renameTo） */
+function fileNameOf(g, i){ return i.renameTo || i.name; }
+
+/** 卡片底部操作区：只有冲突 / 待确认 / 未识别 / 已跳过 才显示 */
+function cardFoot(st, g){
+  if (st === "conflict")
+    return `<div class="card-foot"><button class="mini conflict-btn" data-conflict="${g.id}">⚙ 处理冲突</button><span class="ft-hint">目标已存在同名文件，需选择处理方式</span></div>`;
+  if (st === "review")
+    return `<div class="card-foot"><button class="mini resolve-btn" data-resolve="${g.id}">🔎 确认名称</button><span class="ft-hint">置信度低于阈值 0.70，需人工确认</span></div>`;
+  if (st === "unrecognized")
+    return `<div class="card-foot"><button class="mini resolve-btn" data-resolve="${g.id}">🔎 指定番剧名</button><span class="ft-hint">无法解析番剧名，否则将移入 _未识别/</span></div>`;
+  if (st === "skipped")
+    return `<div class="card-foot"><span class="ft-hint" style="color:#ffbd85">⏭ 已选择跳过，该文件不会归档</span></div>`;
+  if (st === "deferred")
+    return `<div class="card-foot"><span class="ft-hint" style="color:#ffd47a">⏸ 已暂不处理，将移入 _待确认/</span></div>`;
+  if (g.resolved)
+    return `<div class="card-foot"><span class="ft-hint" style="color:#7fe6bf">✅ 已人工确认${g.saveAlias ? "，别名已写回本地别名表" : ""}</span></div>`;
+  return "";
+}
+
+/** 解析检索语法：key:value 为字段过滤，其余为自由关键词 */
+function parseQuery(q){
+  const terms = [], filters = {};
+  q.trim().split(/\s+/).filter(Boolean).forEach(tok => {
+    const m = tok.match(/^(year|month|ep|group|status|lang|src):(.+)$/i);
+    if (m) filters[m[1].toLowerCase()] = m[2].toLowerCase();
+    else terms.push(tok.toLowerCase());
+  });
+  return { terms, filters };
+}
+
+function haystack(g){
+  return [
+    g.raw, g.zh, g.lang, g.year, g.month, g.source, g.group, g.type, g.note,
+    g.items.map(i => i.name).join(" "),
+    targetDir(g)
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function matchGroup(g, pq, filter){
+  const st = state.done[g.id] ? "done" : g.status;
+  if (filter !== "all" && st !== filter && !(filter === "ready" && st === "done")) return false;
+  const hay = haystack(g);
+  for (const t of pq.terms) if (!hay.includes(t)) return false;
+  const f = pq.filters;
+  if (f.year    && String(g.year || "")  !== f.year) return false;
+  if (f.month   && pad(g.month || "")    !== pad(f.month)) return false;
+  if (f.group   && !(g.group || "").toLowerCase().includes(f.group)) return false;
+  if (f.lang    && !(g.lang || "").toLowerCase().includes(f.lang)) return false;
+  if (f.src     && !(g.source || "").toLowerCase().includes(f.src)) return false;
+  if (f.status  && st !== f.status) return false;
+  if (f.ep      && !g.items.some(i => padEpisode(i.ep).toLowerCase().startsWith(f.ep))) return false;
+  return true;
+}
+
+/** 关键词高亮 */
+function hl(text, terms){
+  let out = esc(text);
+  if (!terms || !terms.length) return out;
+  terms.forEach(t => {
+    if (!t) return;
+    const safe = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp("(" + safe + ")", "gi"), "<mark>$1</mark>");
+  });
+  return out;
+}
+
+function visibleGroups(){
+  const pq = parseQuery(state.q);
+  return DATA.filter(g => matchGroup(g, pq, state.filter));
+}
+
+/* =========================================================
+   左侧：原始文件区
+   ========================================================= */
+function renderSource(list){
+  const box = $("sourceList");
+  const terms = parseQuery(state.q).terms;
+  if (!list.length){
+    box.innerHTML = `<div class="empty">没有匹配的文件组<br/>试试清空检索条件，或使用 <code>year:2021</code> 这类语法</div>`;
+    return;
+  }
+  box.innerHTML = list.map(g => {
+    const st = state.done[g.id] ? "done" : g.status;
+    const expanded = state.expanded[g.id] !== false;
+    const zhHtml = g.zh
+      ? `<span class="zh-name">${hl(g.zh, terms)}</span>`
+      : `<span class="zh-name" style="color:#ff9aa5">❓ 未识别</span>`;
+    return `
+    <div class="card ${st}" data-card="${g.id}">
+      <div class="card-main" data-click="${g.id}">
+        <div class="name-row">
+          <span class="raw-name">${hl(g.raw, terms)}</span>
+          <span class="to-arrow">➜</span>
+          ${zhHtml}
+        </div>
+        <div class="meta">
+          <span class="pill ${STATUS_CLASS[st]}">${STATUS_TEXT[st]}</span>
+          <span class="pill">${esc(g.lang)}</span>
+          ${g.year ? `<span class="pill src">${g.year} 年 ${pad(g.month)} 月</span>` : ""}
+          <span class="pill">置信度 ${(g.conf*100).toFixed(0)}%</span>
+          <span class="pill">匹配层级 ${esc(g.level)}</span>
+          <span class="pill">来源 ${esc(g.source)}</span>
+          <span class="pill">${esc(g.group)}</span>
+        </div>
+        ${g.note ? `<div class="meta"><span class="pill ${STATUS_CLASS[st]}">ⓘ ${esc(g.note)}</span></div>` : ""}
+        <div class="target-line">📂 ${esc(targetDir(g))}</div>
+      </div>
+      <ul class="items">
+        ${g.items.map(i => `
+          <li>
+            <span class="ep-badge">${padEpisode(i.ep) || "—"}</span>
+            <span class="fname ${i.dir ? 'dir-badge' : ''}">${i.dir ? "📁" : "🎬"} ${hl(i.name, terms)}</span>
+            ${i.renameTo
+              ? `<span class="fsize" style="color:#7fe6bf">→ ${esc(i.renameTo)}</span>`
+              : (i.note ? `<span class="fsize">${esc(i.note)}</span>` : `<span class="fsize">${esc(i.size)}</span>`)}
+          </li>`).join("")}
+      </ul>
+      ${cardFoot(st, g)}
+    </div>`;
+  }).join("");
+
+  box.querySelectorAll("[data-click]").forEach(el => {
+    const gid = el.getAttribute("data-click");
+    el.addEventListener("click", () => focusTarget(gid));
+    el.addEventListener("mouseenter", () => linkHighlight(gid, true));
+    el.addEventListener("mouseleave", () => linkHighlight(gid, false));
+  });
+  box.querySelectorAll("[data-conflict]").forEach(el =>
+    el.addEventListener("click", () => openConflictDialog(el.dataset.conflict)));
+  box.querySelectorAll("[data-resolve]").forEach(el =>
+    el.addEventListener("click", () => openResolveDialog(el.dataset.resolve)));
+}
+
+/* =========================================================
+   右侧：归档结果树
+   ========================================================= */
+function renderTarget(list){
+  const box = $("targetList");
+  const terms = parseQuery(state.q).terms;
+
+  if (state.view === "diff"){
+    renderDiff(list, terms);
+    return;
+  }
+  $("targetTitle").textContent = "📂 归档结果区";
+
+  if (!list.length){
+    box.innerHTML = `<div class="empty">没有匹配的归档目标<br/>检索条件可能过于严格</div>`;
+    return;
+  }
+
+  // 年份 -> 月份 -> 组（特殊状态进独立桶：0 = _未识别，-1 = _待确认）
+  const years = {};
+  list.forEach(g => {
+    const st = state.done[g.id] ? "done" : g.status;
+    let y, m;
+    if (st === "unrecognized"){ y = 0;  m = 0; }
+    else if (st === "deferred"){ y = -1; m = 0; }
+    else { y = g.year; m = g.month; }
+    (years[y] = years[y] || {})[m] = (years[y][m] || []);
+    years[y][m].push(g);
+  });
+
+  const yearKeys = Object.keys(years).map(Number).sort((a,b) => b - a);
+  let html = `<div class="tree">`;
+  yearKeys.forEach(y => {
+    const monthMap = years[y];
+    const monthKeys = Object.keys(monthMap).map(Number).sort((a,b) => b - a);
+    const yCount = monthKeys.reduce((s,m) => s + monthMap[m].reduce((a,g) => a + g.items.length, 0), 0);
+    const yLabel = y === 0 ? "⚠ _未识别" : (y === -1 ? "⚠ _待确认" : y + " 年");
+    const yKey = "y" + y;
+    html += `
+      <div class="node-year">
+        <div class="row ${state.collapsed[yKey] ? "collapsed" : ""}" data-toggle="${yKey}">
+          <span class="caret">▼</span>
+          <span class="label">📅 ${esc(yLabel)}</span>
+          <span class="count">${yCount} 项</span>
+        </div>
+        <div class="children ${state.collapsed[yKey] ? "hidden" : ""}">`;
+    monthKeys.forEach(m => {
+      const groups = monthMap[m];
+      const mCount = groups.reduce((a,g) => a + g.items.length, 0);
+      const mLabel = m === 0 ? "未分类" : pad(m) + " 月";
+      const mKey = yKey + "-m" + m;
+      html += `
+          <div class="node-month">
+            <div class="row ${state.collapsed[mKey] ? "collapsed" : ""}" data-toggle="${mKey}">
+              <span class="caret">▼</span>
+              <span class="label">🗓 ${esc(mLabel)}</span>
+              <span class="count">${mCount} 项</span>
+            </div>
+            <div class="children ${state.collapsed[mKey] ? "hidden" : ""}">`;
+      groups.forEach(g => {
+        const st = state.done[g.id] ? "done" : g.status;
+        const dotColor = st === "done" ? "#3ba9ff"
+          : st === "ready" ? "#27c08a"
+          : st === "review" ? "#f2b632"
+          : st === "conflict" ? "#f2802b"
+          : (st === "deferred" || st === "skipped") ? "#697691" : "#ef5566";
+        html += `
+              <div class="node-anime" data-node="${g.id}">
+                <div class="row" data-node-row="${g.id}">
+                  <span class="label">📁 ${g.zh ? hl(g.zh, terms) : "❓ 未识别"}</span>
+                  <span class="pill ${STATUS_CLASS[st]}" style="margin-left:6px">${STATUS_TEXT[st]}</span>
+                  <span class="count">${g.items.length} 项</span>
+                  <button class="mini" data-rename-anime="${g.id}" title="重命名目标文件夹">✏️</button>
+                </div>`;
+        g.items.forEach(i => {
+          html += `
+                <div class="file-row">
+                  <span class="dot" style="background:${dotColor}"></span>
+                  <span class="fname">${i.dir ? "📁" : "🎬"} ${hl(fileNameOf(g, i), terms)}</span>
+                  <span class="from">← 来自 ${esc(g.raw)}</span>
+                </div>`;
+        });
+        html += `</div>`;
+      });
+      html += `</div></div>`;
+    });
+    html += `</div></div>`;
+  });
+  html += `</div>`;
+  box.innerHTML = html;
+
+  box.querySelectorAll("[data-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const k = el.getAttribute("data-toggle");
+      state.collapsed[k] = !state.collapsed[k];
+      renderAll();
+    });
+  });
+  box.querySelectorAll("[data-node-row]").forEach(el => {
+    const gid = el.getAttribute("data-node-row");
+    el.addEventListener("mouseenter", () => linkHighlight(gid, true));
+    el.addEventListener("mouseleave", () => linkHighlight(gid, false));
+  });
+  box.querySelectorAll("[data-rename-anime]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); openRenameDialog("targetAnime", el.dataset.renameAnime); }));
+}
+
+/* =========================================================
+   对照列表视图（原路径 ➜ 新路径）
+   ========================================================= */
+function renderDiff(list, terms){
+  $("targetTitle").textContent = "📋 归档对照列表";
+  const box = $("targetList");
+  const root = $("dstPath").value.replace(/[\\/]+$/, "");
+  const srcRoot = $("srcPath").value.replace(/[\\/]+$/, "");
+  if (!list.length){ box.innerHTML = `<div class="empty">没有匹配记录</div>`; return; }
+
+  let rows = "";
+  list.forEach(g => {
+    const st = state.done[g.id] ? "done" : g.status;
+    g.items.forEach(i => {
+      const fname = fileNameOf(g, i);
+      const from = srcRoot + "\\" + i.name;
+      const to = root + "\\" + targetDir(g) + fname;
+      const skipped = (st === "unrecognized" || st === "skipped");
+      rows += `<tr>
+        <td style="width:60px"><span class="pill ${STATUS_CLASS[st]}">${STATUS_TEXT[st]}</span></td>
+        <td class="diff-from">${skipped ? "🚫 " : ""}${hl(from, terms)}</td>
+        <td class="diff-arrow">➜</td>
+        <td class="diff-to">${hl(to, terms)}</td>
+        <td style="width:74px;color:#697691">${(g.conf*100).toFixed(0)}%</td>
+      </tr>`;
+    });
+  });
+  box.innerHTML = `<table class="diff-table">
+    <thead><tr><th>状态</th><th>原始路径</th><th></th><th>归档后路径</th><th>置信度</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+/* =========================================================
+   联动高亮 / 定位
+   ========================================================= */
+function linkHighlight(gid, on){
+  const card = document.querySelector(`[data-card="${gid}"]`);
+  const node = document.querySelector(`[data-node="${gid}"]`);
+  if (card) card.classList.toggle("linked", on);
+  if (node) node.classList.toggle("linked", on);
+}
+
+function focusTarget(gid){
+  if (state.view === "diff"){ switchView("tree"); }
+  // 展开所在年份/月份
+  const g = DATA.find(x => x.id === gid);
+  if (g){
+    const yKey = "y" + (g.year || 0);
+    const mKey = yKey + "-m" + (g.month || 0);
+    delete state.collapsed[yKey];
+    delete state.collapsed[mKey];
+    renderAll();
+  }
+  requestAnimationFrame(() => {
+    const node = document.querySelector(`[data-node="${gid}"]`);
+    if (node){
+      node.scrollIntoView({ behavior:"smooth", block:"center" });
+      node.classList.remove("target-flash");
+      void node.offsetWidth;
+      node.classList.add("target-flash");
+    }
+  });
+}
+
+/* =========================================================
+   状态栏统计
+   ========================================================= */
+function renderStats(list){
+  const st = g => state.done[g.id] ? "done" : g.status;
+  $("sGroups").textContent  = DATA.length;
+  $("sItems").textContent   = DATA.reduce((a,g) => a + g.items.length, 0);
+  $("sReady").textContent   = DATA.filter(g => st(g) === "ready" || st(g) === "done").length;
+  $("sReview").textContent  = DATA.filter(g => st(g) === "review").length;
+  $("sConflict").textContent= DATA.filter(g => st(g) === "conflict").length;
+  $("sUnk").textContent     = DATA.filter(g => st(g) === "unrecognized").length;
+  const isFiltered = state.q.trim() || state.filter !== "all";
+  $("stFiltered").textContent = isFiltered ? `｜筛选结果：${list.length} / ${DATA.length} 组` : "";
+}
+
+/* =========================================================
+   渲染入口
+   ========================================================= */
+function renderAll(){
+  const list = visibleGroups();
+  renderSource(list);
+  renderTarget(list);
+  renderStats(list);
+  $("srcHint").textContent = "源目录：" + $("srcPath").value;
+}
+
+function switchView(v){
+  state.view = v;
+  document.querySelectorAll("#segView span").forEach(s => s.classList.toggle("on", s.dataset.v === v));
+  renderAll();
+}
+
+/* =========================================================
+   日志
+   ========================================================= */
+function logLine(msg, kind){
+  const body = $("logBody");
+  const t = new Date().toLocaleTimeString("zh-CN", { hour12:false });
+  if (body.dataset.started !== "1"){
+    body.innerHTML = "";
+    body.dataset.started = "1";
+  }
+  const div = document.createElement("div");
+  div.className = "log-line " + (kind || "");
+  div.innerHTML = `<span class="t">${t}</span><span class="msg">${msg}</span>`;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+
+function toast(msg, color){
+  const el = $("toast");
+  el.innerHTML = `<span>${msg}</span>`;
+  el.style.borderColor = color || "#323c4f";
+  el.classList.add("on");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("on"), 2600);
+}
+
+/* =========================================================
+   模拟扫描 & 执行归档
+   ========================================================= */
+function simulateScan(){
+  toast("🔍 正在扫描目录…");
+  $("btnScan").disabled = true;
+  $("logBody").dataset.started = "0";
+  $("logBody").innerHTML = `<div class="log-line"><span class="msg" style="color:#697691">扫描中…</span></div>`;
+  let p = 0;
+  const wrap = $("progWrap"), bar = $("progBar");
+  wrap.classList.add("on"); bar.style.width = "0%";
+  const timer = setInterval(() => {
+    p += 12;
+    bar.style.width = Math.min(p, 100) + "%";
+    if (p >= 100){
+      clearInterval(timer);
+      setTimeout(() => { wrap.classList.remove("on"); $("btnScan").disabled = false; }, 350);
+      state.done = {};
+      $("btnUndo").disabled = true;
+      $("logBody").dataset.started = "0";
+      $("logBody").innerHTML = `<div class="log-line"><span class="msg" style="color:#697691">扫描完成，等待执行归档。</span></div>`;
+      renderAll();
+      toast(`✅ 扫描完成：发现 ${DATA.length} 组、${DATA.reduce((a,g)=>a+g.items.length,0)} 项文件/文件夹`);
+    }
+  }, 90);
+}
+
+function runArchive(){
+  const runnable = DATA.filter(g => g.status === "ready" && !state.done[g.id]);
+  if (!runnable.length){
+    toast("⚠️ 没有可归档的项目（可归档项已全部完成）", "#f2b632");
+    return;
+  }
+  const wrap = $("progWrap"), bar = $("progBar");
+  wrap.classList.add("on"); bar.style.width = "0%";
+  $("btnRun").disabled = true;
+  state.lastBatch = [];
+
+  let idx = 0, total = runnable.length;
+  logLine("▶ 开始执行归档批次 #" + new Date().toLocaleDateString("zh-CN").replace(/\//g,""), "ok");
+
+  const step = setInterval(() => {
+    const g = runnable[idx];
+    const st = state.done[g.id] ? "done" : g.status;
+    g.items.forEach(i => {
+      const fname = fileNameOf(g, i);
+      const target = targetDir(g) + fname;
+      state.lastBatch.push({ from: g.id, name: i.name });
+      logLine(`✔ 移动成功 <span style="color:#8fd8ff">${esc(target)}</span> <span style="color:#697691">← ${esc(i.name)}</span>`, "ok");
+    });
+    state.done[g.id] = true;
+    idx++;
+    bar.style.width = Math.round(idx / total * 100) + "%";
+    renderAll();
+
+    if (idx >= total){
+      clearInterval(step);
+      setTimeout(() => wrap.classList.remove("on"), 400);
+      $("btnRun").disabled = false;
+      $("btnUndo").disabled = false;
+      const pending = DATA.filter(x => !state.done[x.id] &&
+        (x.status === "review" || x.status === "unrecognized" || x.status === "conflict")).length;
+      logLine(`✅ 批次完成：成功 ${total} 组；另有 ${pending} 组未处理（冲突 / 待确认 / 未识别）`, "ok");
+      $("logPanel").classList.add("on");
+      toast(`✅ 归档完成：${total} 组已移动${pending ? `，${pending} 组待处理` : ""}`, "#27c08a");
+    }
+  }, 420);
+}
+
+function undoArchive(){
+  if (!state.lastBatch.length && !Object.keys(state.done).length){
+    toast("⚠️ 没有可撤销的批次", "#f2b632");
+    return;
+  }
+  logLine("↩ 撤销上一批次，文件正在移回原位…", "warn");
+  state.done = {};
+  state.lastBatch = [];
+  $("btnUndo").disabled = true;
+  renderAll();
+  toast("↩ 已撤销，文件已移回原位置", "#f2b632");
+}
+
+/* =========================================================
+   事件绑定
+   ========================================================= */
+$("q").addEventListener("input", e => {
+  state.q = e.target.value;
+  $("clearQ").style.display = state.q ? "block" : "none";
+  clearTimeout(window._qt);
+  window._qt = setTimeout(renderAll, 180);   // 防抖
+});
+$("clearQ").addEventListener("click", () => {
+  $("q").value = ""; state.q = "";
+  $("clearQ").style.display = "none";
+  renderAll();
+});
+document.querySelectorAll("#chips .chip").forEach(c => {
+  c.addEventListener("click", () => {
+    state.filter = c.dataset.f;
+    document.querySelectorAll("#chips .chip").forEach(x => x.classList.toggle("on", x === c));
+    renderAll();
+  });
+});
+document.querySelectorAll("#segView span").forEach(s => {
+  s.addEventListener("click", () => switchView(s.dataset.v));
+});
+$("btnRun").addEventListener("click", runArchive);
+$("btnScan").addEventListener("click", simulateScan);
+$("btnUndo").addEventListener("click", undoArchive);
+$("btnLog").addEventListener("click", () => $("logPanel").classList.toggle("on"));
+$("logClose").addEventListener("click", () => $("logPanel").classList.remove("on"));
+/* =========================================================
+   媒体库数据（模拟 \\NAS\Media\已看\Anime 的索引 library.json）
+   ========================================================= */
+const LIB = [
+  { id:"a1", zh:"孤独摇滚！", aliases:["ぼっち・ざ・ろっく！","Bocchi the Rock!"], year:2022, month:10, group:"喵萌奶茶屋",
+    files:[
+      { name:"[喵萌奶茶屋] ぼっち・ざ・ろっく！ - 01 [1080p][简日双语].mp4", ep:"01", mb:356, revertable:true },
+      { name:"[喵萌奶茶屋] ぼっち・ざ・ろっく！ - 02 [1080p][简日双语].mp4", ep:"02", mb:341, revertable:true },
+      { name:"[喵萌奶茶屋] ぼっち・ざ・ろっく！ - 03 [1080p][简日双语].mp4", ep:"03", mb:368, revertable:true }
+    ],
+    subs:[ { dir:"OP&ED", files:[ { name:"[喵萌奶茶屋] ぼっち・ざ・ろっく！ - NCOP [1080p].mp4", ep:"NC", mb:120, revertable:true } ] } ]
+  },
+  { id:"a2", zh:"更衣人偶坠入爱河", aliases:["その着せ替え人形は恋をする","My Dress-Up Darling"], year:2022, month:1, group:"北宇治字幕组",
+    files:[
+      { name:"[北宇治字幕组] その着せ替え人形は恋をする - 01 [1080P][WebRip][HEVC][简繁日内封].mkv", ep:"01", mb:780, revertable:true },
+      { name:"[北宇治字幕组] その着せ替え人形は恋をする - 02 [1080P][WebRip][HEVC][简繁日内封].mkv", ep:"02", mb:764, revertable:true },
+      { name:"[北宇治字幕组] その着せ替え人形は恋をする - 03 [1080P][WebRip][HEVC][简繁日内封].mkv", ep:"03", mb:780, revertable:true }
+    ]
+  },
+  { id:"a3", zh:"间谍过家家", aliases:["SPY×FAMILY","スパイファミリー"], year:2022, month:4, group:"Lilith-Raws",
+    files:[
+      { name:"[Lilith-Raws] Spy x Family - 04 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", ep:"04", mb:301, revertable:true },
+      { name:"[Lilith-Raws] Spy x Family - 05 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", ep:"05", mb:298, revertable:true },
+      { name:"[Lilith-Raws] Spy x Family - 06 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", ep:"06", mb:317, revertable:true }
+    ]
+  },
+  { id:"a4", zh:"这算是哪门子的全能幻想RPG啊！", aliases:["Full Dive","Full Dive RPG"], year:2021, month:4, group:"Lilith-Raws",
+    files:[
+      { name:"[Lilith-Raws] Full Dive - 01 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", ep:"01", mb:275, revertable:true },
+      { name:"[Lilith-Raws] Full Dive - 02 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", ep:"02", mb:283, revertable:true },
+      { name:"[Lilith-Raws] Full Dive - 03 [Baha][WEB-DL][1080p][AVC AAC]", ep:"03", mb:274, revertable:true },
+      { name:"[Lilith-Raws] Full Dive - 04 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4", ep:"04", mb:289, revertable:true }
+    ]
+  },
+  { id:"a5", zh:"女朋友 and 女朋友", aliases:["Kanojo mo Kanojo"], year:2021, month:7, group:"Sakurato",
+    files:[
+      { name:"[Sakurato] Kanojo mo Kanojo - 07 [1080p][CHS].mp4", ep:"07", mb:265, revertable:true },
+      { name:"[Sakurato] Kanojo mo Kanojo - 08 [1080p][CHS].mp4", ep:"08", mb:271, revertable:true }
+    ]
+  },
+  { id:"a6", zh:"鬼灭之刃", aliases:["鬼滅の刃","Kimetsu no Yaiba","Demon Slayer"], year:2019, month:4, group:"Nekomoe kissaten",
+    files:[
+      { name:"[Nekomoe kissaten] Kimetsu no Yaiba - 01 [1080p][BDRip][CHS]", ep:"01", mb:598, revertable:true },
+      { name:"[Nekomoe kissaten] Kimetsu no Yaiba - 02 [1080p][BDRip][CHS].mkv", ep:"02", mb:604, revertable:true }
+    ]
+  },
+  { id:"a7", zh:"我们无法一起学习", aliases:["Bokutachi wa Benkyou ga Dekinai"], year:2019, month:4, group:"Sakurato",
+    files:[
+      { name:"[Sakurato] Bokutachi wa Benkyou ga Dekinai - 01 [1080p][CHS].mkv", ep:"01", mb:520, revertable:false }
+    ]
+  },
+  { id:"a8", zh:"关于我转生变成史莱姆这档事", aliases:["転生したらスライムだった件","Tensei Slime"], year:2018, month:10, group:"ANi",
+    files:[
+      { name:"[ANi] 転生したらスライムだった件 - 12 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4", ep:"12", mb:412, revertable:true },
+      { name:"[ANi] 転生したらスライムだった件 - 13 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4", ep:"13", mb:398, revertable:true }
+    ]
+  },
+  { id:"a9", zh:"Re:从零开始的异世界生活", aliases:["Re:Zero kara Hajimeru Isekai Seikatsu","リゼロ"], year:2016, month:4, group:"ANi",
+    files:[
+      { name:"[ANi] Re-Zero kara Hajimeru Isekai Seikatsu - 18 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4", ep:"18", mb:331, revertable:true },
+      { name:"[ANi] Re-Zero kara Hajimeru Isekai Seikatsu - 19 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4", ep:"19", mb:344, revertable:true }
+    ]
+  },
+  { id:"s1", zh:"_未识别", special:true, aliases:["[Unknown]"], year:null, month:null, group:"—",
+    files:[ { name:"[Group] [Unknown] - 01.mp4", ep:"01", mb:180, revertable:false } ]
+  },
+  { id:"s2", zh:"_待确认", special:true, aliases:["Kanojo mo Kanojo"], year:null, month:null, group:"Sakurato",
+    files:[ { name:"[Sakurato] Kanojo mo Kanojo - 09 [1080p][CHS].mp4", ep:"09", mb:268, revertable:true } ]
+  }
+];
+
+/* 为每个文件分配唯一 ID，便于播放 / 撤回定位 */
+let _uidSeed = 0;
+LIB.forEach(a => {
+  a.files.forEach(f => { f.uid = a.id + "-" + (_uidSeed++); });
+  (a.subs || []).forEach(s => s.files.forEach(f => { f.uid = a.id + "-" + (_uidSeed++); }));
+});
+
+function allFiles(a){ return a.files.concat(...(a.subs || []).map(s => s.files)); }
+
+function findFile(uid){
+  for (const a of LIB){
+    for (const f of a.files) if (f.uid === uid) return { a, f, arr:a.files, sub:null };
+    for (const s of (a.subs || [])) for (const f of s.files) if (f.uid === uid) return { a, f, arr:s.files, sub:s.dir };
+  }
+  return null;
+}
+
+function fmtMB(mb){ return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : Math.round(mb) + " MB"; }
+
+function animeHay(a){
+  return [a.zh, a.aliases.join(" "), a.year, a.month, a.group,
+    allFiles(a).map(f => f.name).join(" ")].join(" ").toLowerCase();
+}
+
+function matchAnime(a, pq){
+  const hay = animeHay(a);
+  for (const t of pq.terms) if (!hay.includes(t)) return false;
+  const f = pq.filters;
+  if (f.year  && String(a.year || "") !== f.year) return false;
+  if (f.month && String(a.month ? pad(a.month) : "") !== pad(f.month)) return false;
+  if (f.ep    && !allFiles(a).some(x => padEpisode(x.ep).toLowerCase().startsWith(f.ep))) return false;
+  return true;
+}
+
+let libQ = "", chartMode = "count";
+
+function fileRow(f, terms){
+  const playTitle = svcOn ? "" : ' title="请先启动本地服务"';
+  const revTitle = !svcOn ? ' title="请先启动本地服务"'
+    : (f.revertable ? "" : ' title="无归档记录（非本工具归档），不可撤回"');
+  return `<div class="lib-file">
+    <span class="ep-badge">${padEpisode(f.ep) || "—"}</span>
+    <span class="fname">🎬 ${hl(f.name, terms)}</span>
+    <span class="fsz">${fmtMB(f.mb)}</span>
+    <button class="mini play" data-play="${f.uid}" ${svcOn ? "" : "disabled"}${playTitle}>▶ 播放</button>
+    <button class="mini rev" data-revert="${f.uid}" ${(f.revertable && svcOn) ? "" : "disabled"}${revTitle}>↩ 撤回</button>
+  </div>`;
+}
+
+function animeCard(a, terms){
+  const files = allFiles(a);
+  const size = files.reduce((s,f) => s + f.mb, 0);
+  const renBtn = a.special ? "" :
+    `<button class="mini" data-lib-anime="${a.id}" ${svcOn ? "" : "disabled"} title="${svcOn ? "重命名番剧文件夹（真实改名）" : "请先启动本地服务"}">✏️</button>`;
+  return `<div class="lib-anime${a.special ? " special" : ""}" style="margin:6px">
+    <div class="arow">
+      <div style="flex:1;min-width:0">
+        <div class="aname">📁 ${hl(a.zh, terms)}</div>
+        <div class="aalias">${esc(a.aliases.join(" / "))} · ${esc(a.group)} · ${a.year ? a.year + "-" + pad(a.month) : "未归档"}</div>
+      </div>
+      <span class="pill">${files.length} 集</span>
+      <span class="pill src">${fmtMB(size)}</span>
+      ${renBtn}
+    </div>
+    ${a.files.map(f => fileRow(f, terms)).join("")}
+    ${(a.subs || []).map(s => `<div class="lib-sub">📁 ${esc(s.dir)}（单独子目录）</div>` + s.files.map(f => fileRow(f, terms)).join("")).join("")}
+  </div>`;
+}
+
+function renderLibrary(){
+  const pq = parseQuery(libQ);
+  const terms = pq.terms;
+  const list = LIB.filter(a => allFiles(a).length && matchAnime(a, pq));
+  const normals = list.filter(a => !a.special);
+  const specials = list.filter(a => a.special);
+  const box = $("libList");
+
+  if (!list.length){
+    box.innerHTML = `<div class="empty">媒体库中没有匹配的番剧<br/>试试清空检索条件，或使用 <code>year:2022</code> 这类语法</div>`;
+  } else {
+    let html = "";
+
+    if (normals.length){
+      const years = {};
+      normals.forEach(a => {
+        years[a.year] = years[a.year] || {};
+        years[a.year][a.month] = years[a.year][a.month] || [];
+        years[a.year][a.month].push(a);
+      });
+
+      html += `<div class="tree">`;
+      Object.keys(years).map(Number).sort((x,y) => y - x).forEach(y => {
+        const months = years[y];
+        let yCount = 0;
+        Object.values(months).forEach(arr => arr.forEach(a => yCount += allFiles(a).length));
+        html += `<div class="node-year">
+          <div class="row"><span class="caret">▼</span><span class="label">📅 ${y} 年</span><span class="count">${yCount} 个文件</span></div>
+          <div class="children">`;
+        Object.keys(months).map(Number).sort((x,y) => y - x).forEach(m => {
+          months[m].forEach(a => { html += animeCard(a, terms); });
+        });
+        html += `</div></div>`;
+      });
+      html += `</div>`;
+    }
+
+    if (specials.length){
+      html += `<div class="special-head">⚠ 特殊目录（_未识别 / _待确认）· 未参与正式归档，可手动归类（不参与图表统计）</div>`;
+      html += specials.map(a => animeCard(a, terms)).join("");
+    }
+
+    box.innerHTML = html;
+
+    box.querySelectorAll("[data-play]").forEach(el => el.addEventListener("click", () => playFile(el.dataset.play)));
+    box.querySelectorAll("[data-revert]").forEach(el => el.addEventListener("click", () => revertFile(el.dataset.revert)));
+    box.querySelectorAll("[data-lib-anime]").forEach(el => el.addEventListener("click", () => {
+      if (!guardSvc()) return;
+      openRenameDialog("libAnime", el.dataset.libAnime);
+    }));
+  }
+
+  renderLibStats();
+  renderChart();
+}
+
+function renderLibStats(){
+  const files = LIB.flatMap(a => allFiles(a));
+  const totalMB = files.reduce((s,f) => s + f.mb, 0);
+  const rev = files.filter(f => f.revertable).length;
+  const normalCount  = LIB.filter(a => !a.special && allFiles(a).length).length;
+  const specialCount = LIB.filter(a => a.special && allFiles(a).length).length;
+  $("libStats").innerHTML = `
+    <div class="stat-card"><div class="k">番剧总数</div><div class="v">${normalCount}<small>部</small></div></div>
+    <div class="stat-card"><div class="k">文件总数</div><div class="v">${files.length}<small>个</small></div></div>
+    <div class="stat-card"><div class="k">总占用空间</div><div class="v">${fmtMB(totalMB)}</div></div>
+    <div class="stat-card"><div class="k">可撤回文件</div><div class="v">${rev}<small>个</small></div></div>
+    <div class="stat-card"><div class="k">特殊目录</div><div class="v">${specialCount}<small>个</small></div></div>`;
+}
+
+function renderChart(){
+  const byYear = {};
+  LIB.forEach(a => {
+    const files = allFiles(a);
+    if (a.special || !a.year || !files.length) return;
+    byYear[a.year] = byYear[a.year] || { count:0, size:0 };
+    byYear[a.year].count++;
+    byYear[a.year].size += files.reduce((s,f) => s + f.mb, 0);
+  });
+  const keys = Object.keys(byYear).map(Number).sort((x,y) => y - x);
+  if (!keys.length){ $("libChart").innerHTML = `<div class="ct">暂无数据</div>`; return; }
+  const val = k => chartMode === "count" ? byYear[k].count : byYear[k].size;
+  const max = Math.max(...keys.map(val)) || 1;
+  const title = chartMode === "count" ? "各年份番剧数量（部）" : "各年份占用空间";
+  $("libChart").innerHTML = `<div class="ct">${title}</div>` + keys.map(k => `
+    <div class="bar-row">
+      <span class="y">${k}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(4, val(k) / max * 100)}%"></div></div>
+      <span class="vv">${chartMode === "count" ? byYear[k].count + " 部" : fmtMB(byYear[k].size)}</span>
+    </div>`).join("");
+}
+
+function playFile(uid){
+  if (!svcOn){ toast("⚠️ 请先启动本地服务", "#f2b632"); return; }
+  const hit = findFile(uid);
+  if (!hit) return;
+  const a = hit.a;
+  const p = `${$("dstPath").value}\\${a.year}\\${pad(a.month)}\\${a.zh}\\${hit.sub ? hit.sub + "\\" : ""}${hit.f.name}`;
+  logLine(`▶ 调用 Windows 默认播放器：<span style="color:#8fd8ff">${esc(p)}</span>`, "");
+  toast(`▶ 已调用默认播放器打开：${hit.f.name}`, "#3ba9ff");
+}
+
+function revertFile(uid){
+  if (!svcOn){ toast("⚠️ 请先启动本地服务", "#f2b632"); return; }
+  const hit = findFile(uid);
+  if (!hit) return;
+  hit.arr.splice(hit.arr.indexOf(hit.f), 1);
+  logLine(`↩ 已撤回 <span style="color:#ffd47a">${esc(hit.f.name)}</span> <span style="color:#697691">← 已移回归档前的原位置</span>`, "warn");
+  renderLibrary();
+  toast(`↩ 已撤回并移回原位：${hit.f.name}`, "#f2b632");
+}
+
+/* =========================================================
+   弹窗基础设施
+   ========================================================= */
+let modalConfirm = null;
+let modalDefer = null;
+let modalCands = [];
+
+function openModal(html, onConfirm, onDefer){
+  $("modalBox").innerHTML = html;
+  $("modalMask").hidden = false;
+  modalConfirm = onConfirm || null;
+  modalDefer = onDefer || null;
+}
+function closeModal(){
+  $("modalMask").hidden = true;
+  modalConfirm = null;
+  modalDefer = null;
+}
+$("modalMask").addEventListener("click", e => { if (e.target === $("modalMask")) closeModal(); });
+$("modalBox").addEventListener("click", e => {
+  const opt = e.target.closest(".opt");
+  if (opt){
+    opt.parentElement.querySelectorAll(".opt").forEach(o => o.classList.toggle("on", o === opt));
+    const v = opt.dataset.v;
+    const nameInput = $("mName");
+    if (nameInput && v !== "manual" && modalCands[+v]) nameInput.value = modalCands[+v].n;
+    return;
+  }
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  if (btn.dataset.act === "cancel") closeModal();
+  else if (btn.dataset.act === "defer" && modalDefer) modalDefer();
+  else if (btn.dataset.act === "ok" && modalConfirm) modalConfirm();
+});
+
+/* =========================================================
+   冲突处理（目标已存在同名文件）
+   ========================================================= */
+function openConflictDialog(gid){
+  const g = DATA.find(x => x.id === gid);
+  const dir = $("dstPath").value + "\\" + targetDir(g);
+  const name = g.items[0].name;
+  const renamed = name.replace(/(\.[^.]+)$/, " (1)$1");
+  openModal(`
+    <h3>⚙ 冲突处理 · 目标已存在同名文件</h3>
+    <div class="mbody">
+      <div class="warn-box">目标目录中已存在同名文件，请选择处理方式。此选择会立即影响归档方案。</div>
+      <div class="kv"><span class="k">目标目录</span><span class="v">${esc(dir)}</span></div>
+      <div class="kv"><span class="k">已存在</span><span class="v">${esc(name)}<br><span style="color:var(--txt-3)">298 MB · 2022-04-12 20:14（此前已归档）</span></span></div>
+      <div class="kv"><span class="k">待移入</span><span class="v">${esc(name)}<br><span style="color:var(--txt-3)">298 MB · 刚刚从源目录扫描到</span></span></div>
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div class="opt on" data-v="rename">
+          <span class="o-i"></span>
+          <div style="flex:1"><div class="o-t">✅ 自动重命名 (1)</div><div class="o-d">保留旧文件，新文件重命名为 <code>${esc(renamed)}</code> 后移入</div></div>
+          <span class="o-s">推荐</span>
+        </div>
+        <div class="opt" data-v="skip">
+          <span class="o-i"></span>
+          <div style="flex:1"><div class="o-t">⏭ 跳过</div><div class="o-d">不移动该文件，原样保留在源目录</div></div>
+        </div>
+        <div style="font-size:11.5px;color:var(--txt-3);line-height:1.75">
+          ℹ 不提供「覆盖」选项（避免误删）。如需其他命名，请关闭本窗后在归档结果区点「✏️」手动重命名。
+        </div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button data-act="cancel">取消</button>
+      <button class="primary" data-act="ok">应用</button>
+    </div>`, () => {
+      const on = document.querySelector("#modalBox .opt.on");
+      applyConflict(g, on ? on.dataset.v : "rename");
+    });
+}
+
+function applyConflict(g, choice){
+  closeModal();
+  const i = g.items[0];
+  if (choice === "skip"){
+    g.status = "skipped";
+    g.note = "已选择「跳过」：源文件保留，不归档";
+    logLine(`⏭ 冲突处理（跳过）：<span style="color:#ffd47a">${esc(i.name)}</span> 保留在源目录`, "warn");
+    toast("⏭ 已跳过，该文件不会归档", "#f2b632");
+  } else {
+    i.renameTo = i.name.replace(/(\.[^.]+)$/, " (1)$1");
+    g.status = "ready";
+    g.note = "已选择「自动重命名 (1)」";
+    logLine(`✅ 冲突处理（重命名）：<span style="color:#8fd8ff">${esc(i.renameTo)}</span> 移入目标目录`, "ok");
+    toast(`✅ 冲突已解决：将重命名为 ${i.renameTo}`, "#27c08a");
+  }
+  renderAll();
+}
+
+/* =========================================================
+   人工确认（待确认 / 未识别）
+   ========================================================= */
+const CANDIDATES = {
+  g7: [
+    { n:"更衣人偶坠入爱河", s:0.88, src:"Bangumi · 中国大陆译名" },
+    { n:"恋上换装娃娃", s:0.81, src:"台译" },
+    { n:"その着せ替え人形は恋をする", s:0.72, src:"日文原名" }
+  ],
+  g8: [
+    { n:"女朋友 and 女朋友", s:0.72, src:"Bangumi · 2021" },
+    { n:"女朋友 and 女朋友 第二季", s:0.70, src:"Bangumi · 2023（同名不同季，需人工判定）" }
+  ],
+  g11: [
+    { n:"謎のアニメ", s:0.74, src:"日文原名（Bangumi 无中文译名，按兜底规则）" },
+    { n:"谜之动画", s:0.60, src:"通用译名（非官方）" }
+  ],
+  g10: []
+};
+
+function openResolveDialog(gid){
+  const g = DATA.find(x => x.id === gid);
+  modalCands = CANDIDATES[gid] || [];
+  const isUnknown = g.status === "unrecognized";
+  openModal(`
+    <h3>🔎 ${isUnknown ? "指定番剧名" : "人工确认番剧名"} · 原始名「${esc(g.raw)}」</h3>
+    <div class="mbody">
+      <div class="warn-box">${isUnknown
+        ? "无法从文件名解析出有效番剧名。请手动指定名称与首播年月，否则该文件将移入 <code>_未识别/</code>。"
+        : `置信度 ${(g.conf * 100).toFixed(0)}% 低于阈值 0.70，请从候选中选择或手动输入。`}</div>
+      <div class="kv"><span class="k">原始组名</span><span class="v">${esc(g.raw)}</span></div>
+      <div class="kv"><span class="k">匹配信息</span><span class="v">${esc(g.level)} · 来源 ${esc(g.source)}</span></div>
+      <div style="display:flex;flex-direction:column;gap:7px">
+        ${modalCands.map((c, idx) => `
+          <div class="opt ${idx === 0 ? "on" : ""}" data-v="${idx}">
+            <span class="o-i"></span>
+            <div style="flex:1"><div class="o-t">${esc(c.n)}</div><div class="o-d">${esc(c.src)}</div></div>
+            <span class="o-s">相似度 ${(c.s * 100).toFixed(0)}%</span>
+          </div>`).join("")}
+        <div class="opt ${modalCands.length ? "" : "on"}" data-v="manual">
+          <span class="o-i"></span>
+          <div style="flex:1"><div class="o-t">✏️ 手动输入</div><div class="o-d">直接填写番剧名（留空则按兜底规则使用日文原名）</div></div>
+        </div>
+      </div>
+      <div class="field"><span class="fk">番剧名</span><input id="mName" value="${esc(modalCands.length ? modalCands[0].n : "")}" placeholder="留空则使用日文原名" spellcheck="false" /></div>
+      <div class="field"><span class="fk">首播年份</span><input id="mYear" value="${g.year || ""}" placeholder="如 2022" spellcheck="false" /></div>
+      <div class="field"><span class="fk">首播月份</span><input id="mMonth" value="${g.month ? pad(g.month) : ""}" placeholder="如 04" spellcheck="false" /></div>
+      <label class="field" style="cursor:pointer">
+        <span class="fk">写回别名表</span>
+        <input type="checkbox" id="mSave" checked style="flex:none;width:auto;accent-color:var(--accent)" />
+        <span style="color:var(--txt-3);font-size:11.5px">下次遇到相同名称直接命中（L1）</span>
+      </label>
+    </div>
+    <div class="mfoot">
+      <button data-act="defer" style="margin-right:auto">⏸ 暂不处理 → _待确认/</button>
+      <button data-act="cancel">取消</button>
+      <button class="primary" data-act="ok">确认并加入归档方案</button>
+    </div>`, () => applyResolve(g, isUnknown), () => applyDefer(g));
+}
+
+/** 暂不处理：移入归档根目录下的 _待确认/ */
+function applyDefer(g){
+  g.status = "deferred";
+  g.note = "已选择「暂不处理」，将移入 _待确认/";
+  closeModal();
+  logLine(`⏸ 暂不处理：<span style="color:#ffd47a">${esc(g.raw)}</span> → <span style="color:#8fd8ff">_待确认/${esc(g.zh || g.raw)}/</span>`, "warn");
+  renderAll();
+  toast("⏸ 已移入 _待确认/，稍后可再处理", "#f2b632");
+}
+
+function applyResolve(g, isUnknown){
+  const y = parseInt($("mYear").value, 10);
+  const m = parseInt($("mMonth").value, 10);
+  let name = $("mName").value.trim();
+  const save = $("mSave") ? $("mSave").checked : false;
+
+  if (!name && isUnknown){ toast("⚠️ 请填写番剧名", "#f2b632"); return; }
+  if (!y || !m){ toast("⚠️ 请填写首播年份与月份", "#f2b632"); return; }
+  if (!name) name = g.raw;   // 留空 → 按兜底规则使用日文原名
+
+  g.zh = name;
+  g.year = y;
+  g.month = m;
+  g.status = "ready";
+  g.conf = 1;
+  g.level = "manual";
+  g.source = save ? "人工确认 · 已写回别名表" : "人工确认";
+  g.note = save ? "已人工确认；别名已写回本地别名表，下次自动命中" : "已人工确认；未写回别名表";
+  g.resolved = true;
+  g.saveAlias = save;
+
+  closeModal();
+  logLine(`🔎 人工确认：<span style="color:#c3b6ff">${esc(name)}</span> → <span style="color:#8fd8ff">${esc(y + "\\" + pad(m) + "\\" + name)}</span>${save ? "（已写回别名表）" : ""}`, "ok");
+  renderAll();
+  toast(`✅ 已确认「${name}」，已加入归档方案`, "#27c08a");
+}
+
+/* =========================================================
+   本地服务：一键启动 / 关闭（Demo 模拟）
+   ========================================================= */
+let svcOn = true;
+function applySvcUI(){
+  $("svcState").classList.toggle("off", !svcOn);
+  $("svcText").textContent = svcOn ? "本地服务运行中 · 127.0.0.1:9999" : "本地服务已停止 · 仅可浏览";
+  $("btnService").textContent = svcOn ? "⏻ 关闭服务" : "⏻ 启动服务";
+}
+$("btnService").addEventListener("click", () => {
+  svcOn = !svcOn;
+  applySvcUI();
+  renderLibrary();
+  logLine(svcOn
+    ? "⏻ 本地服务已启动（127.0.0.1:9999）→ 播放 / 撤回 / 改名可用"
+    : "⏻ 本地服务已停止 → 仍可浏览与检索，播放 / 撤回 / 改名已置灰", svcOn ? "ok" : "warn");
+  toast(svcOn ? "⏻ 本地服务已启动" : "⏻ 本地服务已停止：仍可浏览检索，写入类操作不可用", svcOn ? "#27c08a" : "#f2b632");
+});
+applySvcUI();
+
+/* =========================================================
+   手动重命名（归档结果区 / 媒体库）
+   ========================================================= */
+const ILLEGAL_CHARS = /[\\/:*?"<>|]/;
+
+function guardSvc(){
+  if (!svcOn){ toast("⚠️ 请先启动本地服务", "#f2b632"); return false; }
+  return true;
+}
+
+function openRenameDialog(kind, key){
+  let title = "", label = "", value = "", hint = "", isTarget = true, onApply = null;
+
+  if (kind === "targetAnime"){
+    const g = DATA.find(x => x.id === key);
+    title = "✏️ 重命名番剧文件夹（归档方案）";
+    label = "文件夹名";
+    value = g.zh || "";
+    hint = `归档路径：${esc($("dstPath").value)}\\${esc(String(g.year || "?"))}\\${esc(g.month ? pad(g.month) : "?")}\\<b>文件夹名</b>\\`;
+    onApply = v => {
+      const old = g.zh;
+      g.zh = v;
+      g.note = "目标文件夹名已手动修改";
+      logLine(`✏️ 重命名目标文件夹：<span style="color:#c3b6ff">${esc(old || "—")}</span> → <span style="color:#8fd8ff">${esc(v)}</span>`, "ok");
+    };
+  } else if (kind === "libAnime"){
+    const a = LIB.find(x => x.id === key);
+    isTarget = false;
+    title = "✏️ 重命名番剧文件夹（媒体库 · 真实改名）";
+    label = "文件夹名";
+    value = a.zh;
+    hint = `将在 NAS 上真实重命名这一层：<br>${esc($("dstPath").value)}\\${esc(String(a.year))}\\${esc(pad(a.month))}\\<b>${esc(a.zh)}</b>\\<br>例：孤独摇滚！ → 孤独摇滚`;
+    onApply = v => {
+      const old = a.zh;
+      a.zh = v;
+      logLine(`✏️ 媒体库改名（文件夹）：<span style="color:#c3b6ff">${esc(old)}</span> → <span style="color:#8fd8ff">${esc(v)}</span>`, "ok");
+    };
+  }
+
+  openModal(`
+    <h3>${title}</h3>
+    <div class="mbody">
+      <div class="kv"><span class="k">位置</span><span class="v">${hint}</span></div>
+      <div class="field"><span class="fk">${label}</span><input id="rnValue" value="${esc(value)}" spellcheck="false" /></div>
+      <div class="warn-box" style="background:var(--bg-3);border-color:var(--line);color:var(--txt-3)">
+        ℹ 只改<b>番剧文件夹</b>这一层：<code>{年份}/{月份}</code> 与里面的<b>文件名都不会改动</b>。${isTarget
+          ? "仅影响归档方案，不会动源文件，需重新执行归档才生效。"
+          : "会立即在 NAS 上生效（并写入日志，可反向改回）。"}
+      </div>
+    </div>
+    <div class="mfoot">
+      <button data-act="cancel">取消</button>
+      <button class="primary" data-act="ok">应用</button>
+    </div>`, () => {
+      const v = $("rnValue").value.trim();
+      if (!v){ toast("⚠️ 文件夹名不能为空", "#f2b632"); return; }
+      if (ILLEGAL_CHARS.test(v)){ toast('⚠️ 名称含非法字符 \\ / : * ? " < > | ', "#f2b632"); return; }
+      onApply(v);
+      closeModal();
+      renderAll();
+      renderLibrary();
+      toast("✏️ 已应用重命名", "#27c08a");
+    });
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape"){
+    if (!$("modalMask").hidden) closeModal();
+    else $("logPanel").classList.remove("on");
+    return;
+  }
+  const box = $("viewLibrary").hidden ? $("q") : $("libQ");
+  if (e.key === "/" && document.activeElement !== box && document.activeElement.tagName !== "INPUT"){
+    e.preventDefault(); box.focus();
+  }
+});
+
+/* =========================================================
+   一级视图切换
+   ========================================================= */
+function setMainView(v){
+  document.querySelectorAll("#nav span").forEach(s => s.classList.toggle("on", s.dataset.v === v));
+  $("viewArchive").hidden = v !== "archive";
+  $("viewLibrary").hidden = v !== "library";
+  $("pathsArchive").style.display   = v === "archive" ? "" : "none";
+  $("actionsArchive").style.display = v === "archive" ? "" : "none";
+  $("toolbarArchive").style.display = v === "archive" ? "" : "none";
+  if (v === "library") renderLibrary();
+}
+document.querySelectorAll("#nav span").forEach(s => s.addEventListener("click", () => setMainView(s.dataset.v)));
+
+/* =========================================================
+   主题：跟随系统 / 深色 / 浅色
+   ========================================================= */
+const THEMES = ["system", "dark", "light"];
+const THEME_LABEL = { system:"🌓 跟随系统", dark:"🌙 深色", light:"☀️ 浅色" };
+let themeIdx = 0;
+function applyTheme(){
+  const t = THEMES[themeIdx];
+  if (t === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  $("btnTheme").textContent = THEME_LABEL[t];
+}
+$("btnTheme").addEventListener("click", () => {
+  themeIdx = (themeIdx + 1) % THEMES.length;
+  applyTheme();
+  toast("主题：" + THEME_LABEL[THEMES[themeIdx]].replace(/^\S+\s/, ""));
+});
+applyTheme();
+
+/* =========================================================
+   媒体库：检索 / 图表 / 重建索引
+   ========================================================= */
+$("libQ").addEventListener("input", e => {
+  libQ = e.target.value;
+  $("libClear").style.display = libQ ? "block" : "none";
+  clearTimeout(window._lqt);
+  window._lqt = setTimeout(renderLibrary, 180);
+});
+$("libClear").addEventListener("click", () => {
+  $("libQ").value = ""; libQ = "";
+  $("libClear").style.display = "none";
+  renderLibrary();
+});
+document.querySelectorAll("#segChart span").forEach(s => {
+  s.addEventListener("click", () => {
+    chartMode = s.dataset.c;
+    document.querySelectorAll("#segChart span").forEach(x => x.classList.toggle("on", x === s));
+    renderChart();
+  });
+});
+$("btnReindex").addEventListener("click", () => {
+  $("libIndexInfo").textContent = "正在重建索引…";
+  toast("↻ 正在扫描 已看/Anime 并重建 library.json…");
+  setTimeout(() => {
+    $("libIndexInfo").textContent = "索引已更新 · " + new Date().toLocaleTimeString("zh-CN", { hour12:false });
+    renderLibrary();
+    toast("✅ 索引已重建", "#27c08a");
+  }, 900);
+});
+
+renderAll();
+renderLibrary();
+</script>
+</body>
+</html>

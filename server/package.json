@@ -1,0 +1,21 @@
+{
+  "name": "anime-archive-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "番剧归档器 + 离线媒体库 —— 本地轻量服务（仅监听 127.0.0.1）",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsc -p tsconfig.json && node dist/index.js",
+    "plan": "tsc -p tsconfig.json && node dist/cli.js plan",
+    "index": "tsc -p tsconfig.json && node dist/cli.js index"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
