@@ -91,6 +91,8 @@ export interface AppState {
   libraryError: string | null;
   libQuery: string;
   chartMode: 'count' | 'size';
+  /** 统计/图表的跨季筛选：all=全部，spread=跨季，single=不跨季 */
+  chartSpreadFilter: 'all' | 'spread' | 'single';
 
   /* ---------------- actions ---------------- */
   boot: () => Promise<void>;
@@ -182,6 +184,7 @@ export interface AppState {
   loadLibrary: () => Promise<void>;
   rebuildIndex: () => Promise<void>;  setLibQuery: (q: string) => void;
   setChartMode: (m: 'count' | 'size') => void;
+  setChartSpreadFilter: (f: 'all' | 'spread' | 'single') => void;
   play: (fullPath: string, name: string) => Promise<void>;
   revertFile: (fullPath: string, name: string) => Promise<void>;
   renameLibraryAnime: (relPath: string, newName: string) => Promise<void>;
@@ -283,6 +286,7 @@ export const useApp = create<AppState>((set, get) => ({
   libraryError: null,
   libQuery: '',
   chartMode: 'count',
+  chartSpreadFilter: 'all',
   focusAnime: null,
   selected: [],
 
@@ -1128,6 +1132,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   setLibQuery: q => set({ libQuery: q }),
   setChartMode: m => set({ chartMode: m }),
+  setChartSpreadFilter: chartSpreadFilter => set({ chartSpreadFilter }),
 
   play: async (fullPath, name) => {
     if (!get().serviceOnline) { get().showToast('⚠️ 请先启动本地服务', '#f2b632'); return; }

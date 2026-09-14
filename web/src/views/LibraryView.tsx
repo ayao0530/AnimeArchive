@@ -4,7 +4,7 @@ import { useApp } from '../store';
 import { api } from '../api/client';
 import type { LibraryAnime, LibraryFile, LibrarySubDir, MonthStat, YearStat } from '../types';
 import {
-  allLibraryFiles, animeEpisodes, compareByEpisode, computeAirStatsLocal, formatDateTime, formatSize,
+  allLibraryFiles, animeEpisodes, attributedMonthsOf, compareByEpisode, computeAirStatsLocal, formatDateTime, formatSize,
   formatTime, groupAirAnime, highlight, isTextSelecting, joinWinPath, matchAnime, pad, padEpisode, parseQuery,
   type BucketAnime
 } from '../utils';
@@ -32,6 +32,8 @@ function LibToolbar() {
   const setLibQuery = useApp(s => s.setLibQuery);
   const chartMode = useApp(s => s.chartMode);
   const setChartMode = useApp(s => s.setChartMode);
+  const chartSpreadFilter = useApp(s => s.chartSpreadFilter);
+  const setChartSpreadFilter = useApp(s => s.setChartSpreadFilter);
   const rebuildIndex = useApp(s => s.rebuildIndex);
   const serviceOnline = useApp(s => s.serviceOnline);
   const libraryLoading = useApp(s => s.libraryLoading);
@@ -52,6 +54,11 @@ function LibToolbar() {
       <div className="seg" id="segChart">
         <span className={chartMode === 'count' ? 'on' : ''} onClick={() => setChartMode('count')}>番剧数量</span>
         <span className={chartMode === 'size' ? 'on' : ''} onClick={() => setChartMode('size')}>占用空间</span>
+      </div>
+      <div className="seg" id="segChartSpread" title="按统计口径筛选是否会跨季度重复计入">
+        <span className={chartSpreadFilter === 'all' ? 'on' : ''} onClick={() => setChartSpreadFilter('all')}>跨季：全部</span>
+        <span className={chartSpreadFilter === 'spread' ? 'on' : ''} onClick={() => setChartSpreadFilter('spread')}>是</span>
+        <span className={chartSpreadFilter === 'single' ? 'on' : ''} onClick={() => setChartSpreadFilter('single')}>否</span>
       </div>
       <button
         onClick={() => void rebuildIndex()}
@@ -805,6 +812,7 @@ function statRowLabel(year: number, month: number): string {
 function LibStatsPanel() {
   const library = useApp(s => s.library);
   const chartMode = useApp(s => s.chartMode);
+  const chartSpreadFilter = useApp(s => s.chartSpreadFilter);
   const setCollapsedMany = useApp(s => s.setCollapsedMany);
   const requestFocusAnime = useApp(s => s.requestFocusAnime);
   const setLibQuery = useApp(s => s.setLibQuery);
@@ -814,7 +822,24 @@ function LibStatsPanel() {
   /** 「年份/月份明细」里展开番剧名单的行（**默认全部折叠**） */
   const [openNames, setOpenNames] = useState<string[]>([]);
 
+  /** 切换筛选后恢复默认展开状态，避免保留一个在新结果中已不存在的年份/月。 */
+  useEffect(() => {
+    setOpenYears(null);
+    setOpenNames([]);
+  }, [chartSpreadFilter]);
+
   const stats = library?.stats;
+
+  /** “是否跨季”沿用统计口径：一部番剧被分到多个季度桶，即视为跨季。 */
+  const chartAnime = useMemo(() => {
+    const anime = library?.anime ?? [];
+    if (chartSpreadFilter === 'all') return anime;
+    return anime.filter(a => {
+      if (a.special || a.year === null) return false;
+      const spread = attributedMonthsOf(a, animeEpisodes(a)).length > 1;
+      return chartSpreadFilter === 'spread' ? spread : !spread;
+    });
+  }, [library, chartSpreadFilter]);
 
   /*
    * 图表数据 = **播出月份口径**（口径说明见 utils.computeAirStatsLocal）：
@@ -828,7 +853,8 @@ function LibStatsPanel() {
    */
   const airStats = useMemo(() => {
     if (!library) return null;
-    const fromIndex = Array.isArray(library.stats.airMonths) && Array.isArray(library.stats.airYears);
+    const fromIndex = chartSpreadFilter === 'all'
+      && Array.isArray(library.stats.airMonths) && Array.isArray(library.stats.airYears);
     const s = fromIndex
       ? {
         months: library.stats.airMonths as MonthStat[],
@@ -836,15 +862,15 @@ function LibStatsPanel() {
         excludedShort: library.stats.excludedShort ?? 0,
         spreadCount: library.stats.spreadCount ?? 0
       }
-      : computeAirStatsLocal(library.anime);
+      : computeAirStatsLocal(chartAnime);
     return { ...s, fromIndex };
-  }, [library]);
+  }, [library, chartAnime, chartSpreadFilter]);
 
   const months = airStats?.months ?? [];
   const airYears = airStats?.years ?? [];
 
   /** 各桶里的番剧名单（同一套口径，条数与「N 部」一致） */
-  const airNames = useMemo(() => groupAirAnime(library?.anime ?? []), [library]);
+  const airNames = useMemo(() => groupAirAnime(chartAnime), [chartAnime]);
   const namesOf = (r: StatsRow): BucketAnime[] => (r.depth === 1
     ? (airNames.byMonth.get(r.key) ?? [])
     : (airNames.byYear.get(Number(r.key)) ?? []));
@@ -947,6 +973,9 @@ function LibStatsPanel() {
   const chartTitle = chartMode === 'count' ? '各年份番剧数量（部）' : '各年份占用空间';
   const detailTitle = '年份明细';
   const hint = '· 点年份整行即可展开该年的月份（只列真实存在的月份）';
+  const spreadFilterHint = chartSpreadFilter === 'spread'
+    ? '筛选：仅跨季'
+    : chartSpreadFilter === 'single' ? '筛选：仅不跨季' : '';
 
   /**
    * 统计口径说明（用户 2026-09-13 定的规则，实现在 utils.computeAirStatsLocal）：
@@ -955,9 +984,10 @@ function LibStatsPanel() {
    */
   const scopeHint = [
     '口径：单部 ≥4 集',
+    spreadFilterHint,
     airStats && airStats.spreadCount > 0 ? `${airStats.spreadCount} 部跨季重复计入` : '',
     airStats && airStats.excludedShort > 0 ? `已排除 ${airStats.excludedShort} 部（≤3 集）` : '',
-    airStats && !airStats.fromIndex ? '（旧索引现算，重建索引后一致）' : ''
+    airStats && chartSpreadFilter === 'all' && !airStats.fromIndex ? '（旧索引现算，重建索引后一致）' : ''
   ].filter(Boolean).join(' · ');
 
   /** 该行可展开的年份（null = 不可展开：月份子行、没有归档月份的年份） */
