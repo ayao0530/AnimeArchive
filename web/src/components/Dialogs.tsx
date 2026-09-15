@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type BangumiHit } from '../api/client';
 import type { AnimeGroup } from '../types';
-import { pad, sourceLabel } from '../utils';
+import { formatDateTime, formatTime, pad, sourceLabel } from '../utils';
 
 /* =========================================================
    通用弹窗
@@ -651,6 +651,8 @@ export interface MoveItemTarget {
   path: string;
   name: string;
   isDir: boolean;
+  /** 媒体库条目的最后修改时间；未提供时保留原有路径展示 */
+  mtime?: string;
 }
 
 export function MoveItemDialog({
@@ -767,7 +769,9 @@ export function MoveItemDialog({
           {items.map(it => (
             <div key={it.path} className="move-row">
               <span className="mr-name">{it.isDir ? '📁' : '🎬'} {it.name}</span>
-              <span className="mr-path" title={it.path}>{it.path}</span>
+              {it.mtime !== undefined
+                ? <span className="mr-time" title={`最后修改：${formatTime(it.mtime)}`}>最后修改 {formatDateTime(it.mtime)}</span>
+                : <span className="mr-path" title={it.path}>{it.path}</span>}
             </div>
           ))}
         </div>

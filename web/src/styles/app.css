@@ -619,6 +619,10 @@ mark{background:rgba(242,182,50,.3);color:#ffe9b0;border-radius:3px;padding:0 2p
   flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--txt-3);font-family:Consolas,"Cascadia Mono",monospace;font-size:10.5px;
 }
+.move-list .mr-time{
+  flex:1;min-width:0;text-align:right;white-space:nowrap;color:var(--txt-3);
+  font-family:Consolas,"Cascadia Mono",monospace;font-size:10.5px;font-variant-numeric:tabular-nums;
+}
 
 /* ---------- 弹窗内的 Bangumi 在线检索 ---------- */
 .bgm-search{display:flex;flex-direction:column;gap:6px}

@@ -23,6 +23,14 @@ export default function LibraryView() {
   );
 }
 
+/** 子目录没有单独存目录时间，整体移动时取其中最新文件的修改时间。 */
+function latestMtime(files: LibraryFile[]): string | undefined {
+  return files.reduce<string | undefined>(
+    (latest, f) => (f.mtime && (!latest || f.mtime > latest) ? f.mtime : latest),
+    undefined
+  );
+}
+
 /* =========================================================
    工具条（检索只作用于媒体库）
    ========================================================= */
@@ -143,15 +151,14 @@ function LibListPanel() {
     return { n, size, dirs: dirs.size };
   }, [library, sel]);
 
-  /** 文件路径 → 字节数（仅用于执行期显示总大小） */
-  const sizeOf = (p: string): number => {
-    const key = p.toLowerCase();
+  /** 批量选择只保存路径；打开弹窗时从当前索引补回大小与最后修改时间。 */
+  const fileByPath = useMemo(() => {
+    const map = new Map<string, LibraryFile>();
     for (const a of library?.anime ?? []) {
-      const hit = allLibraryFiles(a).find(f => f.fullPath.toLowerCase() === key);
-      if (hit) return hit.size;
+      for (const f of allLibraryFiles(a)) map.set(f.fullPath.toLowerCase(), f);
     }
-    return 0;
-  };
+    return map;
+  }, [library]);
 
   /** 把勾选的文件交给同一个「二次整理」弹窗（底部批量条与卡片头的「移动选中的 N 个」都走它） */
   const openMove = (paths: string[]): void => {
@@ -161,7 +168,17 @@ function LibListPanel() {
       root && p.toLowerCase().startsWith(root.toLowerCase()) ? p.slice(root.length).replace(/^\\+/, '') : p;
     const dirs = new Set(paths.map(p => p.replace(/\\[^\\]+$/, '').toLowerCase()));
     setMoving({
-      items: paths.map(p => ({ path: p, name: p.split('\\').pop() ?? p, isDir: false, archivedPath: p, size: sizeOf(p) })),
+      items: paths.map(p => {
+        const file = fileByPath.get(p.toLowerCase());
+        return {
+          path: p,
+          name: file?.name ?? p.split('\\').pop() ?? p,
+          isDir: false,
+          archivedPath: p,
+          size: file?.size ?? 0,
+          mtime: file?.mtime ?? ''
+        };
+      }),
       currentTarget: dirs.size === 1 ? rel(paths[0].replace(/\\[^\\]+$/, '')) : `多个位置（${dirs.size} 个目录）`
     });
   };
@@ -243,6 +260,14 @@ function LibListPanel() {
     <section className="panel">
       <div className="panel-head">
         <span>📺 媒体库</span>
+        <button
+          className="mini"
+          onClick={() => void loadLibrary()}
+          disabled={!serviceOnline || libraryLoading}
+          title={serviceOnline ? '重新读取当前媒体库目录索引（不重新扫描磁盘）' : '请先启动本地服务'}
+        >
+          ⟳ 刷新文件目录
+        </button>
         <span className="hint">{library?.libraryRoot ?? '（尚未生成索引）'}</span>
       </div>
       <div className="panel-body" id="libList">
@@ -333,15 +358,15 @@ function LibListPanel() {
                             onRename={() => setRenaming(a)}
                             onRevealFolder={() => revealFolder(a)}
                             onMoveAll={() => setMoving({
-                              items: allLibraryFiles(a).map(f => ({ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size })),
+                              items: allLibraryFiles(a).map(f => ({ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size, mtime: f.mtime })),
                               currentTarget: a.relPath
                             })}
                             onMove={f => setMoving({
-                              items: [{ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size }],
+                              items: [{ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size, mtime: f.mtime }],
                               currentTarget: a.relPath
                             })}
                             onMoveDir={(sub, dirPath) => setMoving({
-                              items: [{ path: dirPath, name: sub.dir, isDir: true, archivedPath: dirPath, size: sub.totalSize ?? sub.files.reduce((x, f) => x + f.size, 0) }],
+                              items: [{ path: dirPath, name: sub.dir, isDir: true, archivedPath: dirPath, size: sub.totalSize ?? sub.files.reduce((x, f) => x + f.size, 0), mtime: latestMtime(sub.files) ?? '' }],
                               currentTarget: a.relPath
                             })}
                             onRevertDir={(sub, dirPath) => void revertFile(dirPath, sub.dir)}
@@ -377,15 +402,15 @@ function LibListPanel() {
                 onRename={() => setRenaming(a)}
                 onRevealFolder={() => revealFolder(a)}
                 onMoveAll={() => setMoving({
-                  items: allLibraryFiles(a).map(f => ({ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size })),
+                  items: allLibraryFiles(a).map(f => ({ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size, mtime: f.mtime })),
                   currentTarget: a.relPath
                 })}
                 onMove={f => setMoving({
-                  items: [{ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size }],
+                  items: [{ path: f.fullPath, name: f.name, isDir: false, archivedPath: f.fullPath, size: f.size, mtime: f.mtime }],
                   currentTarget: a.relPath
                 })}
                 onMoveDir={(sub, dirPath) => setMoving({
-                  items: [{ path: dirPath, name: sub.dir, isDir: true, archivedPath: dirPath, size: sub.totalSize ?? sub.files.reduce((x, f) => x + f.size, 0) }],
+                  items: [{ path: dirPath, name: sub.dir, isDir: true, archivedPath: dirPath, size: sub.totalSize ?? sub.files.reduce((x, f) => x + f.size, 0), mtime: latestMtime(sub.files) ?? '' }],
                   currentTarget: a.relPath
                 })}
                 onRevertDir={(sub, dirPath) => void revertFile(dirPath, sub.dir)}

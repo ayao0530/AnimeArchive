@@ -59,6 +59,8 @@ export interface MoveEntry {
   archivedPath?: string;
   /** 字节数（可选）—— 仅用于执行期显示「正在移动 11 个文件（5.6 GB）」 */
   size?: number;
+  /** 最后修改时间（媒体库入口提供，用于替代弹窗中的路径） */
+  mtime?: string;
 }
 
 export function EntryMoveHost({
@@ -121,7 +123,12 @@ export function EntryMoveHost({
   return (
     <MoveItemDialog
       mode={mode}
-      items={items.map<MoveItemTarget>(i => ({ path: i.archivedPath ?? i.path, name: i.name, isDir: i.isDir }))}
+      items={items.map<MoveItemTarget>(i => ({
+        path: i.archivedPath ?? i.path,
+        name: i.name,
+        isDir: i.isDir,
+        mtime: i.mtime
+      }))}
       currentTarget={currentTarget}
       loadDirs={animeDirs}
       planDirs={planDirs}
