@@ -124,6 +124,13 @@ export const api = {
     request<{ exists: boolean; readable: boolean; writable: boolean }>(
       `/api/fs/check?path=${encodeURIComponent(path)}`
     ),
+  /** 源目录中是否存在归档根目录之外的待归档视频（用于选择启动页签） */
+  sourcePending: () => request<{
+    sourceRoot: string;
+    targetRoot: string;
+    readable: boolean;
+    hasPending: boolean;
+  }>('/api/fs/source-pending'),
   /** 显式创建目录（归档根目录不存在时） */
   ensureDir: (path: string) =>
     request<{ created: boolean; path: string; writable: boolean }>('/api/fs/ensure', {

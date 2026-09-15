@@ -211,6 +211,35 @@ export async function scanSource(opts: ScanOptions): Promise<ScanResult> {
 }
 
 /**
+ * 启动页签判断用的轻量探测：源目录中是否还有可归档的视频文件。
+ *
+ * 与完整扫描相比，这里不读取文件大小、不解析名称，找到第一项就返回；
+ * 归档根目录及其整个子树必须排除，否则“媒体库里有文件”会永远把首页切回归档管理。
+ * 非视频文件不算待归档项——完整扫描本来也会忽略它们。
+ */
+export async function hasPendingSourceVideo(source: string, archiveRoot?: string): Promise<boolean> {
+  const sourceRoot = normalizePath(source);
+  const excludeRoot = archiveRoot ? normalizePath(archiveRoot) : '';
+  if (!sourceRoot) return false;
+
+  const rootStat = await fsp.stat(toLongPath(sourceRoot)).catch(() => null);
+  if (!rootStat?.isDirectory()) return false;
+
+  const walk = async (dir: string): Promise<boolean> => {
+    const entries = await fsp.readdir(toLongPath(dir), { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (excludeRoot && isInside(full, excludeRoot)) continue;
+      if (entry.isFile() && VIDEO_EXTS.has(path.extname(entry.name).toLowerCase())) return true;
+      if (entry.isDirectory() && await walk(full)) return true;
+    }
+    return false;
+  };
+
+  return walk(sourceRoot);
+}
+
+/**
  * 扫描媒体库（已看/Anime），**不做排除**，供 indexer 使用。
  * 返回顶层条目（年份目录 / _未识别 / _待确认 等）。
  */

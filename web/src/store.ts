@@ -97,6 +97,8 @@ export interface AppState {
   /* ---------------- actions ---------------- */
   boot: () => Promise<void>;
   setView: (v: 'archive' | 'library') => void;
+  /** 按源目录现状选择默认页签（有待归档视频 → 归档整理，否则 → 媒体库） */
+  selectDefaultView: () => Promise<void>;
   cycleTheme: () => void;
   showToast: (msg: string, color?: string) => void;
   pushLog: (msg: string, kind?: LogLine['kind']) => void;
@@ -247,7 +249,7 @@ function decorateGroups(groups: AnimeGroup[]): {
 }
 
 export const useApp = create<AppState>((set, get) => ({
-  view: 'archive',
+  view: 'library',
   themeIdx: 0,
   serviceOnline: false,
   servicePort: 9999,
@@ -324,10 +326,12 @@ export const useApp = create<AppState>((set, get) => ({
         // 上次的归档可能还在服务端后台继续跑（页面被关掉并不等于任务停了）
         void get().loadExecProgress();
         await get().loadLibrary();
+        await get().selectDefaultView();
       } catch (err) {
         get().pushLog(`⚠ 读取配置失败：${(err as Error).message}`, 'warn');
       }
     } else {
+      set({ view: 'library' });
       get().pushLog('⏻ 本地服务未启动 → 仅可只读浏览媒体库；播放 / 撤回 / 重命名不可用', 'warn');
       if (!injected) {
         try {
@@ -340,6 +344,25 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setView: v => set({ view: v }),
+  selectDefaultView: async () => {
+    if (!get().serviceOnline) { set({ view: 'library' }); return; }
+    try {
+      const status = await api.sourcePending();
+      set({ view: status.hasPending ? 'archive' : 'library' });
+      get().pushLog(
+        status.hasPending
+          ? '📥 源目录仍有待归档视频，默认进入归档整理'
+          : '📺 源目录没有待归档视频，默认进入媒体库',
+        ''
+      );
+    } catch (err) {
+      // 不能把“检查失败”当成“源目录为空”，否则前端已更新而后台服务尚未重启时
+      // `/api/fs/source-pending` 会返回 404，并静默停在媒体库。失败时保守进入归档整理，
+      // 用户至少能看到源目录并手动扫描；服务重启后会恢复精确判断。
+      set({ view: 'archive' });
+      get().pushLog(`⚠ 无法检查源目录待归档文件，已保守进入归档整理：${(err as Error).message}`, 'warn');
+    }
+  },
   cycleTheme: () => {
     const idx = (get().themeIdx + 1) % THEME_ORDER.length;
     set({ themeIdx: idx });

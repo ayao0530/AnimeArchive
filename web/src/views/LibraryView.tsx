@@ -264,7 +264,7 @@ function LibListPanel() {
           className="mini"
           onClick={() => void loadLibrary()}
           disabled={!serviceOnline || libraryLoading}
-          title={serviceOnline ? '重新读取当前媒体库目录索引（不重新扫描磁盘）' : '请先启动本地服务'}
+          title={serviceOnline ? '重新读取当前媒体库目录索引（不切换页签）' : '请先启动本地服务'}
         >
           ⟳ 刷新文件目录
         </button>

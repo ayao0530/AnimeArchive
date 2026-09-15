@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import { URL } from 'node:url';
 import { ArchivePlan, AppConfig } from '../types';
 import { Store } from '../core/store';
-import { scanSource } from '../core/scanner';
+import { hasPendingSourceVideo, scanSource } from '../core/scanner';
 import { groupItems } from '../core/grouper';
 import { buildPlan } from '../core/planner';
 import { executePlan, requestExecuteStop, EntryDecision, revert } from '../core/executor';
@@ -179,6 +179,19 @@ async function handleApi(
       const readable = await isReadableDir(target);
       const writable = await isWritableDir(target);
       return sendJson(res, 200, { ok: true, data: { exists: readable || writable, readable, writable, kind } });
+    }
+
+    /** 打开/刷新网页时决定默认进入“归档整理”还是“媒体库”。 */
+    case '/api/fs/source-pending': {
+      const cfg = ctx.store.getConfig();
+      const sourceRoot = normalizePath(cfg.sourceRoot || '');
+      const targetRoot = normalizePath(cfg.targetRoot || '');
+      const readable = sourceRoot ? await isReadableDir(sourceRoot) : false;
+      const hasPending = readable ? await hasPendingSourceVideo(sourceRoot, targetRoot) : false;
+      return sendJson(res, 200, {
+        ok: true,
+        data: { sourceRoot, targetRoot, readable, hasPending }
+      });
     }
 
     /**

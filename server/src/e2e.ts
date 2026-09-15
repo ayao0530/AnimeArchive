@@ -7,7 +7,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Store } from './core/store';
-import { scanSource } from './core/scanner';
+import { hasPendingSourceVideo, scanSource } from './core/scanner';
 import { groupItems } from './core/grouper';
 import { buildPlan } from './core/planner';
 import { executePlan, isExecuteRunning, requestExecuteStop, revert } from './core/executor';
@@ -935,6 +935,18 @@ async function main(): Promise<void> {
     attributedMonths(mkAnime('t3', 2026, 2, []), 33).map(x => `${x.year}-${x.month}`).join(',') === '2026-2' &&
     attributedMonths(mkAnime('t4', 2024, 10, []), 54).map(x => `${x.year}-${x.month}`).join(',') === '2024-10,2025-1,2025-4,2025-7',
     `12 集=${epFlat}；12+多文件目录=${epMultifile}；12+SP&OPED=${epSp}；12+非视频=${epOther}；3+整季目录=${epNested}`);
+
+  /* ---------- A43 启动页签：只看归档根之外的待归档视频 ---------- */
+  const switchRoot = path.join(root, 'startup-view');
+  const switchArchive = path.join(switchRoot, '已看', 'Anime');
+  await write(path.join(switchArchive, '2026', '01', '库内番剧', '01.mkv'));
+  await write(path.join(switchRoot, '说明.txt'));
+  const onlyArchive = await hasPendingSourceVideo(switchRoot, switchArchive);
+  await write(path.join(switchRoot, '待整理', '新番', '01.mp4'));
+  const withPending = await hasPendingSourceVideo(switchRoot, switchArchive);
+  check('A43', '启动/刷新页签：完整排除归档根；仅有非视频时进媒体库；存在待归档视频时进归档整理',
+    !onlyArchive && withPending,
+    `仅归档库+说明文件=${onlyArchive}；新增待归档视频=${withPending}`);
 
   /* ---------- 汇总 ---------- */
   const failed = results.filter(r => !r.pass);
